@@ -2,10 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Lead } from '../../types';
 
 const ChatPage = () => {
-  const [leads, setLeads] = useState<any[]>([]); // Usando any[] para evitar conflitos com a tipagem antiga
+  const [leads, setLeads] = useState<any[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
   const [selectedLead, setSelectedLead] = useState<any | null>(null);
   const [newMessage, setNewMessage] = useState('');
@@ -31,15 +30,18 @@ const ChatPage = () => {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'dentup_leads' },
-        (payload) => {
+        (payload: any) => {
+          const newLead = payload.new as any;
+          if (!newLead || !newLead.id) return;
+
           setLeads((currentLeads) => {
-            const existingLead = currentLeads.find((lead) => lead.id === payload.new.id);
+            const existingLead = currentLeads.find((lead) => lead.id === newLead.id);
             if (existingLead) {
               return currentLeads.map((lead) =>
-                lead.id === payload.new.id ? payload.new : lead
+                lead.id === newLead.id ? newLead : lead
               );
             } else {
-              return [...currentLeads, payload.new];
+              return [...currentLeads, newLead];
             }
           });
         }
@@ -54,7 +56,6 @@ const ChatPage = () => {
   // 2. Carrega as Mensagens 
   useEffect(() => {
     if (selectedLead) {
-      // Pega o telefone independente de como a coluna se chame no banco
       const rawPhone = selectedLead.phone || selectedLead.phone_number || '';
       const cleanPhone = rawPhone.replace(/\D/g, '');
       const targetSessionId = `dentup_${cleanPhone}`;
@@ -85,9 +86,10 @@ const ChatPage = () => {
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'dentup_messages' },
-          (payload) => {
-            if (payload.new.session_id === targetSessionId) {
-              setMessages((currentMessages) => [...currentMessages, payload.new]);
+          (payload: any) => {
+            const newMsg = payload.new as any;
+            if (newMsg && newMsg.session_id === targetSessionId) {
+              setMessages((currentMessages) => [...currentMessages, newMsg]);
             }
           }
         )
