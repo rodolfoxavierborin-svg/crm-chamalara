@@ -231,8 +231,23 @@ const ChatPage = () => {
 
             if (!msgContent) return null;
 
+            // --- FILTRO DE SEGURANÇA (Oculta códigos e pensamentos da IA) ---
+            // 1. Oculta tipos internos do n8n/LangChain
+            if (msgType === 'tool' || msgType === 'function' || msgType === 'system') return null;
+            
+            // 2. Oculta pensamentos da IA chamando funções (ex: "Calling Create_an_event...")
+            if (typeof msgContent === 'string' && msgContent.includes('Calling ')) return null;
+            
+            // 3. Oculta devoluções brutas de API (arquivos JSON)
+            if (typeof msgContent === 'string' && (msgContent.trim().startsWith('[{') || msgContent.trim().startsWith('{"'))) return null;
+            // ---------------------------------------------------------------
+
             const isPatient = msgType === 'human';
             const isAI = msgType === 'ai';
+            const isAgent = msgType === 'human_agent';
+
+            // Se sobrou algum lixo que não é paciente, nem IA e nem atendente humano, nós ignoramos
+            if (!isPatient && !isAI && !isAgent) return null;
 
             return (
               <div
@@ -251,7 +266,8 @@ const ChatPage = () => {
                   <span className="block text-xs font-semibold mb-1 opacity-75">
                     {isPatient ? 'Paciente' : isAI ? 'Lara (IA)' : 'Atendente'}
                   </span>
-                  <p className="text-sm whitespace-pre-wrap">{msgContent}</p>
+                  {/* Adicionado o "break-words" no CSS para impedir vazamento de tela */}
+                  <p className="text-sm whitespace-pre-wrap break-words">{msgContent}</p>
                   <span className="mt-1 block text-xs opacity-75">
                     {new Date(msg.created_at).toLocaleTimeString()}
                   </span>
