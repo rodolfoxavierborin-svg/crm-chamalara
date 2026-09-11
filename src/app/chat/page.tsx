@@ -163,15 +163,13 @@ const ChatPage = () => {
     }
   };
 
-  return (
-    <div className="flex h-screen bg-gray-100 overflow-hidden">
-      {/* 
+  {/* 
         Sidebar - Lista de Leads 
         No celular: Oculta se tiver lead selecionado. Mostra se for null.
         No desktop (md): Sempre mostra (w-1/3).
       */}
       <div className={`w-full md:w-1/3 border-r bg-white p-4 overflow-y-auto ${selectedLead ? 'hidden md:block' : 'block'}`}>
-        <h2 className="mb-4 text-xl font-semibold">Conversas Recentes</h2>
+        <h2 className="mb-4 text-xl font-semibold text-gray-900">Conversas Recentes</h2>
         <ul>
           {leads.map((lead) => {
             const displayPhone = lead.phone || lead.phone_number || '';
@@ -184,7 +182,7 @@ const ChatPage = () => {
                 onClick={() => setSelectedLead(lead)}
               >
                 <div>
-                  <p className="font-medium text-gray-800">{lead.name || 'Sem Nome'}</p>
+                  <p className="font-medium text-gray-900">{lead.name || 'Sem Nome'}</p>
                   <p className="text-sm text-gray-500">{displayPhone}</p>
                 </div>
                 {lead.is_paused && (
