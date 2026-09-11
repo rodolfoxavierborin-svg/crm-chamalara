@@ -17,7 +17,6 @@ const ChatPage = () => {
         console.error('Error fetching leads:', error);
       } else {
         setLeads(data || []);
-        // Auto-seleciona apenas no desktop, ou mantém o primeiro se quiser
         if (data && data.length > 0) {
           setSelectedLead(data[0]);
         }
@@ -58,7 +57,7 @@ const ChatPage = () => {
   useEffect(() => {
     if (selectedLead) {
       const rawPhone = selectedLead.phone || selectedLead.phone_number || '';
-      const cleanPhone = rawPhone.replace(/\D/g, '');
+      const cleanPhone = rawPhone.replace(new RegExp('\\D', 'g'), '');
       const targetSessionId = `dentup_${cleanPhone}`;
 
       const fetchMessages = async () => {
@@ -129,7 +128,7 @@ const ChatPage = () => {
     setNewMessage('');
 
     const rawPhone = selectedLead.phone || selectedLead.phone_number || '';
-    const cleanPhone = rawPhone.replace(/\D/g, '');
+    const cleanPhone = rawPhone.replace(new RegExp('\\D', 'g'), '');
     const targetSessionId = `dentup_${cleanPhone}`;
 
     try {
@@ -163,11 +162,9 @@ const ChatPage = () => {
     }
   };
 
-  {/* 
-        Sidebar - Lista de Leads 
-        No celular: Oculta se tiver lead selecionado. Mostra se for null.
-        No desktop (md): Sempre mostra (w-1/3).
-      */}
+  return (
+    <div className="flex h-screen bg-gray-100 overflow-hidden">
+      {/* Sidebar - Lista de Leads */}
       <div className={`w-full md:w-1/3 border-r bg-white p-4 overflow-y-auto ${selectedLead ? 'hidden md:block' : 'block'}`}>
         <h2 className="mb-4 text-xl font-semibold text-gray-900">Conversas Recentes</h2>
         <ul>
@@ -196,19 +193,13 @@ const ChatPage = () => {
         </ul>
       </div>
 
-      {/* 
-        Area Central do Chat
-        No celular: Mostra se tiver lead selecionado. Oculta se for null.
-        No desktop (md): Sempre mostra (w-2/3).
-      */}
+      {/* Area Central do Chat */}
       <div className={`w-full md:w-2/3 flex-col ${selectedLead ? 'flex' : 'hidden md:flex'}`}>
-        
         {selectedLead ? (
           <>
             {/* Header do Chat */}
             <div className="border-b bg-white p-3 md:p-4 shadow-sm flex flex-col md:flex-row md:justify-between md:items-center gap-3">
               <div className="flex items-center gap-2">
-                {/* Botão Voltar (Aparece só no celular) */}
                 <button
                   onClick={() => setSelectedLead(null)}
                   className="md:hidden mr-2 p-2 bg-gray-100 rounded-md text-gray-600 hover:bg-gray-200 transition"
@@ -245,7 +236,6 @@ const ChatPage = () => {
 
                 if (!msgContent || typeof msgContent !== 'string') return null;
 
-                // Filtros de segurança
                 const trimmed = msgContent.trim();
                 if (trimmed.startsWith('[{') || trimmed.startsWith('{"')) return null;
                 if (msgContent.includes('Calling Create_an_event') || msgContent.includes('Calling Buscar')) return null;
@@ -305,7 +295,6 @@ const ChatPage = () => {
             </div>
           </>
         ) : (
-          // Tela vazia (aparece no Desktop quando não tem lead selecionado)
           <div className="flex flex-1 items-center justify-center bg-gray-50">
             <p className="text-gray-500 font-medium">Selecione um lead ao lado para iniciar a conversa.</p>
           </div>
