@@ -17,6 +17,7 @@ const ChatPage = () => {
         console.error('Error fetching leads:', error);
       } else {
         setLeads(data || []);
+        // Auto-seleciona apenas no desktop, ou mantém o primeiro se quiser
         if (data && data.length > 0) {
           setSelectedLead(data[0]);
         }
@@ -162,18 +163,14 @@ const ChatPage = () => {
     }
   };
 
-  if (!selectedLead) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-100">
-        <p>Selecione um lead para iniciar a conversa.</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex h-screen bg-gray-100">
-      {/* Sidebar - Lista de Leads */}
-      <div className="w-1/3 border-r bg-white p-4 overflow-y-auto">
+    <div className="flex h-screen bg-gray-100 overflow-hidden">
+      {/* 
+        Sidebar - Lista de Leads 
+        No celular: Oculta se tiver lead selecionado. Mostra se for null.
+        No desktop (md): Sempre mostra (w-1/3).
+      */}
+      <div className={`w-full md:w-1/3 border-r bg-white p-4 overflow-y-auto ${selectedLead ? 'hidden md:block' : 'block'}`}>
         <h2 className="mb-4 text-xl font-semibold">Conversas Recentes</h2>
         <ul>
           {leads.map((lead) => {
@@ -181,13 +178,13 @@ const ChatPage = () => {
             return (
               <li
                 key={lead.id}
-                className={`mb-2 cursor-pointer rounded-md p-2 hover:bg-gray-50 flex justify-between items-center ${
+                className={`mb-2 cursor-pointer rounded-md p-2 hover:bg-gray-50 flex justify-between items-center border-b md:border-none ${
                   selectedLead?.id === lead.id ? 'bg-blue-100' : ''
                 }`}
                 onClick={() => setSelectedLead(lead)}
               >
                 <div>
-                  <p className="font-medium">{lead.name || 'Sem Nome'}</p>
+                  <p className="font-medium text-gray-800">{lead.name || 'Sem Nome'}</p>
                   <p className="text-sm text-gray-500">{displayPhone}</p>
                 </div>
                 {lead.is_paused && (
@@ -201,98 +198,120 @@ const ChatPage = () => {
         </ul>
       </div>
 
-      {/* Area Central do Chat */}
-      <div className="flex w-2/3 flex-col">
-        {/* Header do Chat */}
-        <div className="border-b bg-white p-4 shadow-sm flex justify-between items-center">
-          <div>
-            <h2 className="text-xl font-semibold">
-              {selectedLead.name || 'Sem Nome'} ({selectedLead.phone || selectedLead.phone_number || ''})
-            </h2>
-          </div>
-
-          <button
-            onClick={togglePauseAI}
-            className={`px-4 py-2 rounded-md font-medium text-sm transition-colors ${
-              selectedLead.is_paused
-                ? 'bg-red-100 text-red-700 hover:bg-red-200 border border-red-300'
-                : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border border-emerald-300'
-            }`}
-          >
-            {selectedLead.is_paused ? '⏸️ IA Pausada (Atendimento Humano)' : '🤖 IA Ativa'}
-          </button>
-        </div>
-
-      {/* Histórico de Mensagens */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {messages.map((msg) => {
-            const msgType = msg.message?.type || msg.type;
-            const msgContent = msg.message?.content || msg.content;
-
-            if (!msgContent || typeof msgContent !== 'string') return null;
-
-            // --- FILTRO DE SEGURANÇA REFINADO ---
-            // 1. Oculta apenas JSONs brutos do Google Calendar / APIs
-            const trimmed = msgContent.trim();
-            if (trimmed.startsWith('[{') || trimmed.startsWith('{"')) return null;
-
-            // 2. Oculta pensamentos internos de chamada de ferramenta
-            if (msgContent.includes('Calling Create_an_event') || msgContent.includes('Calling Buscar')) return null;
-
-            // 3. Define quem enviou para colorir o balão
-            const isPatient = msgType === 'human' || msgType === 'user';
-            const isAI = msgType === 'ai' || msgType === 'assistant';
-
-            return (
-              <div
-                key={msg.id}
-                className={`flex ${isPatient ? 'justify-start' : 'justify-end'}`}
-              >
-                <div
-                  className={`max-w-xs rounded-lg p-3 shadow-sm ${
-                    isPatient
-                      ? 'bg-white text-gray-800 border'
-                      : isAI
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-blue-600 text-white'
-                  }`}
+      {/* 
+        Area Central do Chat
+        No celular: Mostra se tiver lead selecionado. Oculta se for null.
+        No desktop (md): Sempre mostra (w-2/3).
+      */}
+      <div className={`w-full md:w-2/3 flex-col ${selectedLead ? 'flex' : 'hidden md:flex'}`}>
+        
+        {selectedLead ? (
+          <>
+            {/* Header do Chat */}
+            <div className="border-b bg-white p-3 md:p-4 shadow-sm flex flex-col md:flex-row md:justify-between md:items-center gap-3">
+              <div className="flex items-center gap-2">
+                {/* Botão Voltar (Aparece só no celular) */}
+                <button
+                  onClick={() => setSelectedLead(null)}
+                  className="md:hidden mr-2 p-2 bg-gray-100 rounded-md text-gray-600 hover:bg-gray-200 transition"
                 >
-                  <span className="block text-xs font-semibold mb-1 opacity-75">
-                    {isPatient ? 'Paciente' : isAI ? 'Lara (IA)' : 'Atendente'}
-                  </span>
-                  <p className="text-sm whitespace-pre-wrap break-words">{msgContent}</p>
-                  <span className="mt-1 block text-xs opacity-75">
-                    {new Date(msg.created_at).toLocaleTimeString()}
+                  ⬅️ Voltar
+                </button>
+                <div>
+                  <h2 className="text-lg md:text-xl font-semibold text-gray-800">
+                    {selectedLead.name || 'Sem Nome'}
+                  </h2>
+                  <span className="text-sm text-gray-500">
+                    {selectedLead.phone || selectedLead.phone_number || ''}
                   </span>
                 </div>
               </div>
-            );
-          })}
-        </div>
 
-        {/* Input para Envio */}
-        <div className="border-t bg-white p-4">
-          <div className="flex items-center space-x-2">
-            <input
-              type="text"
-              placeholder="Digite sua mensagem..."
-              className="flex-1 rounded-md border p-2 focus:border-blue-500 focus:outline-none text-gray-800"
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  handleSendMessage();
-                }
-              }}
-            />
-            <button
-              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 font-medium"
-              onClick={handleSendMessage}
-            >
-              Enviar
-            </button>
+              <button
+                onClick={togglePauseAI}
+                className={`w-full md:w-auto px-4 py-2 rounded-md font-medium text-sm transition-colors text-center ${
+                  selectedLead.is_paused
+                    ? 'bg-red-100 text-red-700 hover:bg-red-200 border border-red-300'
+                    : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border border-emerald-300'
+                }`}
+              >
+                {selectedLead.is_paused ? '⏸️ IA Pausada (Atend. Humano)' : '🤖 IA Ativa'}
+              </button>
+            </div>
+
+            {/* Histórico de Mensagens */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {messages.map((msg) => {
+                const msgType = msg.message?.type || msg.type;
+                const msgContent = msg.message?.content || msg.content;
+
+                if (!msgContent || typeof msgContent !== 'string') return null;
+
+                // Filtros de segurança
+                const trimmed = msgContent.trim();
+                if (trimmed.startsWith('[{') || trimmed.startsWith('{"')) return null;
+                if (msgContent.includes('Calling Create_an_event') || msgContent.includes('Calling Buscar')) return null;
+
+                const isPatient = msgType === 'human' || msgType === 'user';
+                const isAI = msgType === 'ai' || msgType === 'assistant';
+
+                return (
+                  <div
+                    key={msg.id}
+                    className={`flex ${isPatient ? 'justify-start' : 'justify-end'}`}
+                  >
+                    <div
+                      className={`max-w-[85%] md:max-w-xs rounded-lg p-3 shadow-sm ${
+                        isPatient
+                          ? 'bg-white text-gray-800 border'
+                          : isAI
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-blue-600 text-white'
+                      }`}
+                    >
+                      <span className="block text-xs font-semibold mb-1 opacity-75">
+                        {isPatient ? 'Paciente' : isAI ? 'Lara (IA)' : 'Atendente'}
+                      </span>
+                      <p className="text-sm whitespace-pre-wrap break-words">{msgContent}</p>
+                      <span className="mt-1 block text-[10px] opacity-75 text-right">
+                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Input para Envio */}
+            <div className="border-t bg-white p-3 md:p-4">
+              <div className="flex items-center space-x-2">
+                <input
+                  type="text"
+                  placeholder="Digite sua mensagem..."
+                  className="flex-1 rounded-md border p-3 md:p-2 focus:border-blue-500 focus:outline-none text-gray-800 text-sm md:text-base"
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSendMessage();
+                    }
+                  }}
+                />
+                <button
+                  className="rounded-md bg-blue-600 px-4 py-3 md:py-2 text-white hover:bg-blue-700 font-medium text-sm md:text-base"
+                  onClick={handleSendMessage}
+                >
+                  Enviar
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          // Tela vazia (aparece no Desktop quando não tem lead selecionado)
+          <div className="flex flex-1 items-center justify-center bg-gray-50">
+            <p className="text-gray-500 font-medium">Selecione um lead ao lado para iniciar a conversa.</p>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
