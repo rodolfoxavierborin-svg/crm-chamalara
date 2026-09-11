@@ -1,18 +1,41 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
+
+// Função auxiliar para formatar a data estilo WhatsApp
+const formatarHorario = (dataIso: string | null) => {
+  if (!dataIso) return '';
+  const data = new Date(dataIso);
+  const hoje = new Date();
+  
+  const ehHoje = data.toDateString() === hoje.toDateString();
+  
+  if (ehHoje) {
+    return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  } else {
+    return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  }
+};
 
 const ChatPage = () => {
   const [leads, setLeads] = useState<any[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
   const [selectedLead, setSelectedLead] = useState<any | null>(null);
   const [newMessage, setNewMessage] = useState('');
+  
+  // Ref para o scroll automático do chat
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // 1. Carrega os Leads
   useEffect(() => {
     const fetchLeads = async () => {
-      const { data, error } = await supabase.from('dentup_leads').select('*');
+      // Já traz do banco ordenado pela última interação
+      const { data, error } = await supabase
+        .from('dentup_leads')
+        .select('*')
+        .order('última_interação', { ascending: false });
+
       if (error) {
         console.error('Error fetching leads:', error);
       } else {
@@ -36,13 +59,20 @@ const ChatPage = () => {
 
           setLeads((currentLeads) => {
             const existingLead = currentLeads.find((lead) => lead.id === newLead.id);
+            let updatedLeads;
             if (existingLead) {
-              return currentLeads.map((lead) =>
+              updatedLeads = currentLeads.map((lead) =>
                 lead.id === newLead.id ? newLead : lead
               );
             } else {
-              return [...currentLeads, newLead];
+              updatedLeads = [...currentLeads, newLead];
             }
+            // Reordena sempre que houver uma alteração em tempo real
+            return updatedLeads.sort((a, b) => {
+              const dateA = a.última_interação ? new Date(a.última_interação).getTime() : 0;
+              const dateB = b.última_interação ? new Date(b.última_interação).getTime() : 0;
+              return dateB - dateA;
+            });
           });
         }
       )
@@ -101,7 +131,12 @@ const ChatPage = () => {
     }
   }, [selectedLead]);
 
-  // 3. Alterna a pausa da IA
+  // 3. Scroll Automático sempre que 'messages' atualizar
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // 4. Alterna a pausa da IA
   const togglePauseAI = async () => {
     if (!selectedLead) return;
 
@@ -120,7 +155,7 @@ const ChatPage = () => {
     }
   };
 
-  // 4. Envia mensagem manual
+  // 5. Envia mensagem manual
   const handleSendMessage = async () => {
     if (newMessage.trim() === '' || !selectedLead) return;
 
@@ -162,30 +197,45 @@ const ChatPage = () => {
     }
   };
 
+  // Garante que a lista renderizada esteja ordenada corretamente na interface
+  const sortedLeads = [...leads].sort((a, b) => {
+    const dateA = a.última_interação ? new Date(a.última_interação).getTime() : 0;
+    const dateB = b.última_interação ? new Date(b.última_interação).getTime() : 0;
+    return dateB - dateA;
+  });
+
   return (
     <div className="flex h-screen bg-gray-100 overflow-hidden">
       {/* Sidebar - Lista de Leads */}
       <div className={`w-full md:w-1/3 border-r bg-white p-4 overflow-y-auto ${selectedLead ? 'hidden md:block' : 'block'}`}>
         <h2 className="mb-4 text-xl font-semibold text-gray-900">Conversas Recentes</h2>
         <ul>
-          {leads.map((lead) => {
+          {sortedLeads.map((lead) => {
             const displayPhone = lead.phone || lead.phone_number || '';
             return (
               <li
                 key={lead.id}
-                className={`mb-2 cursor-pointer rounded-md p-2 hover:bg-gray-50 flex justify-between items-center border-b md:border-none ${
+                className={`mb-2 cursor-pointer rounded-md p-3 hover:bg-gray-50 flex flex-col justify-between border-b md:border-none ${
                   selectedLead?.id === lead.id ? 'bg-blue-100' : ''
                 }`}
                 onClick={() => setSelectedLead(lead)}
               >
-                <div>
-                  <p className="font-medium text-gray-900">{lead.name || 'Sem Nome'}</p>
-                  <p className="text-sm text-gray-500">{displayPhone}</p>
+                <div className="flex justify-between items-start w-full">
+                  <div>
+                    <p className="font-medium text-gray-900">{lead.name || 'Sem Nome'}</p>
+                    <p className="text-sm text-gray-500">{displayPhone}</p>
+                  </div>
+                  {/* Exibição do Horário estilo WhatsApp */}
+                  <div className="text-xs text-gray-400 font-medium whitespace-nowrap ml-2">
+                    {formatarHorario(lead.última_interação)}
+                  </div>
                 </div>
                 {lead.is_paused && (
-                  <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded font-semibold">
-                    Pausado
-                  </span>
+                  <div className="mt-1">
+                    <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded font-semibold uppercase tracking-wider">
+                      Pausado
+                    </span>
+                  </div>
                 )}
               </li>
             );
@@ -268,6 +318,8 @@ const ChatPage = () => {
                   </div>
                 );
               })}
+              {/* Elemento invisível para forçar o scroll até o final */}
+              <div ref={messagesEndRef} />
             </div>
 
             {/* Input para Envio */}
