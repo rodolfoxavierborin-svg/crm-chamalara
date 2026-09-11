@@ -30,18 +30,24 @@ const ChatPage = () => {
   // 1. Carrega os Leads
   useEffect(() => {
     const fetchLeads = async () => {
-      // Já traz do banco ordenado pela última interação
+      // Busca limpa sem order direto no banco para evitar erro de acentuação na coluna
       const { data, error } = await supabase
         .from('dentup_leads')
-        .select('*')
-        .order('última_interação', { ascending: false });
+        .select('*');
 
       if (error) {
         console.error('Error fetching leads:', error);
       } else {
-        setLeads(data || []);
-        if (data && data.length > 0) {
-          setSelectedLead(data[0]);
+        const leadsData = data || [];
+        setLeads(leadsData);
+        if (leadsData.length > 0) {
+          // Ordena temporariamente para pegar o lead mais recente como selecionado inicial
+          const sortedInitial = [...leadsData].sort((a, b) => {
+            const dateA = a['última_interação'] ? new Date(a['última_interação']).getTime() : 0;
+            const dateB = b['última_interação'] ? new Date(b['última_interação']).getTime() : 0;
+            return dateB - dateA;
+          });
+          setSelectedLead(sortedInitial[0]);
         }
       }
     };
@@ -59,20 +65,13 @@ const ChatPage = () => {
 
           setLeads((currentLeads) => {
             const existingLead = currentLeads.find((lead) => lead.id === newLead.id);
-            let updatedLeads;
             if (existingLead) {
-              updatedLeads = currentLeads.map((lead) =>
+              return currentLeads.map((lead) =>
                 lead.id === newLead.id ? newLead : lead
               );
             } else {
-              updatedLeads = [...currentLeads, newLead];
+              return [...currentLeads, newLead];
             }
-            // Reordena sempre que houver uma alteração em tempo real
-            return updatedLeads.sort((a, b) => {
-              const dateA = a.última_interação ? new Date(a.última_interação).getTime() : 0;
-              const dateB = b.última_interação ? new Date(b.última_interação).getTime() : 0;
-              return dateB - dateA;
-            });
           });
         }
       )
@@ -197,10 +196,10 @@ const ChatPage = () => {
     }
   };
 
-  // Garante que a lista renderizada esteja ordenada corretamente na interface
+  // Garante que a lista renderizada esteja ordenada da mais recente para a mais antiga
   const sortedLeads = [...leads].sort((a, b) => {
-    const dateA = a.última_interação ? new Date(a.última_interação).getTime() : 0;
-    const dateB = b.última_interação ? new Date(b.última_interação).getTime() : 0;
+    const dateA = a['última_interação'] ? new Date(a['última_interação']).getTime() : 0;
+    const dateB = b['última_interação'] ? new Date(b['última_interação']).getTime() : 0;
     return dateB - dateA;
   });
 
@@ -212,6 +211,8 @@ const ChatPage = () => {
         <ul>
           {sortedLeads.map((lead) => {
             const displayPhone = lead.phone || lead.phone_number || '';
+            const ultimaInteracao = lead['última_interação'] || lead.ultima_interacao;
+            
             return (
               <li
                 key={lead.id}
@@ -227,7 +228,7 @@ const ChatPage = () => {
                   </div>
                   {/* Exibição do Horário estilo WhatsApp */}
                   <div className="text-xs text-gray-400 font-medium whitespace-nowrap ml-2">
-                    {formatarHorario(lead.última_interação)}
+                    {formatarHorario(ultimaInteracao)}
                   </div>
                 </div>
                 {lead.is_paused && (
