@@ -54,8 +54,10 @@ const ChatPage = () => {
     const leadsChannel = supabase.channel('leads-channel').on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_leads' }, (payload: any) => {
       const newLead = payload.new as any;
       if (!newLead || !newLead.id) return;
-      setLeads((curr) => curr.find(l => l.id === newLead.id) ? curr.map(l => l.id === newLead.id ? newLead : l) : [...curr, newLead]);
-      setSelectedLead(prev => prev?.id === newLead.id ? newLead : prev);
+      
+      // Correção TypeScript: Tipagem explícita para curr e prev
+      setLeads((curr: any[]) => curr.find(l => l.id === newLead.id) ? curr.map(l => l.id === newLead.id ? newLead : l) : [...curr, newLead]);
+      setSelectedLead((prev: any) => prev?.id === newLead.id ? newLead : prev);
     }).subscribe();
     return () => { supabase.removeChannel(leadsChannel); };
   }, []);
@@ -72,7 +74,8 @@ const ChatPage = () => {
       fetchMessages();
       const messagesChannel = supabase.channel('messages-channel').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
         const newMsg = payload.new as any;
-        if (newMsg && newMsg.session_id === targetSessionId) setMessages(prev => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg]);
+        // Correção TypeScript: Tipagem explícita para prev
+        if (newMsg && newMsg.session_id === targetSessionId) setMessages((prev: any[]) => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg]);
       }).subscribe();
       return () => { supabase.removeChannel(messagesChannel); };
     }
@@ -87,7 +90,8 @@ const ChatPage = () => {
     const newStatus = !selectedLead.is_paused;
     const updatedLead = { ...selectedLead, is_paused: newStatus };
     setSelectedLead(updatedLead);
-    setLeads(prev => prev.map(l => l.id === selectedLead.id ? updatedLead : l));
+    // Correção TypeScript: Tipagem explícita para prev
+    setLeads((prev: any[]) => prev.map(l => l.id === selectedLead.id ? updatedLead : l));
     await supabase.from('dentup_leads').update({ is_paused: newStatus }).eq('id', selectedLead.id);
   };
 
@@ -98,17 +102,21 @@ const ChatPage = () => {
     const cleanPhone = (selectedLead.phone || selectedLead.phone_number || '').replace(/\D/g, '');
     const targetSessionId = `dentup_${cleanPhone}`;
     const optimisticMessage = { id: `temp-${Date.now()}`, session_id: targetSessionId, created_at: new Date().toISOString(), message: { type: 'human_agent', content: messageText } };
-    setMessages(prev => [...prev, optimisticMessage]);
+    
+    // Correção TypeScript: Tipagem explícita para prev
+    setMessages((prev: any[]) => [...prev, optimisticMessage]);
 
     try {
       if (!selectedLead.is_paused) {
         const leadPausado = { ...selectedLead, is_paused: true };
         setSelectedLead(leadPausado);
-        setLeads(prev => prev.map(l => l.id === selectedLead.id ? leadPausado : l));
+        // Correção TypeScript: Tipagem explícita para prev
+        setLeads((prev: any[]) => prev.map(l => l.id === selectedLead.id ? leadPausado : l));
         await supabase.from('dentup_leads').update({ is_paused: true }).eq('id', selectedLead.id);
       }
       const { data: insertedMessage, error } = await supabase.from('dentup_messages').insert({ session_id: targetSessionId, message: { type: 'human_agent', content: messageText } }).select().single();
-      if (!error) setMessages(prev => prev.map(msg => msg.id === optimisticMessage.id ? insertedMessage : msg));
+      // Correção TypeScript: Tipagem explícita para prev
+      if (!error) setMessages((prev: any[]) => prev.map(msg => msg.id === optimisticMessage.id ? insertedMessage : msg));
       
       fetch('https://api.rodolfoxborin.com.br/webhook/crm-envio-humano', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
