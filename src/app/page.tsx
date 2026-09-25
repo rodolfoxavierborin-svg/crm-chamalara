@@ -173,12 +173,12 @@ export default function HomePage() {
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans notranslate" translate="no">
       
-      {/* HEADER PRINCIPAL COM LOGO OFICIAL */}
-      <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between z-20 shadow-sm">
-        <div className="flex items-center gap-3">
-          <img src="/logo.png" alt="Dent'up Odonto" className="h-10 w-auto object-contain" />
-          <div className="h-6 w-px bg-slate-200 mx-1 hidden sm:block"></div>
-          <h1 className="text-lg font-bold text-slate-800 notranslate hidden sm:block" translate="no">
+      {/* HEADER PRINCIPAL COM LOGO MAIOR */}
+      <div className="bg-white border-b border-slate-200 px-6 py-2 flex items-center justify-between z-20 shadow-sm">
+        <div className="flex items-center gap-4">
+          <img src="/logo.png" alt="Dent'up Odonto" className="h-12 md:h-14 w-auto object-contain" />
+          <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
+          <h1 className="text-xl font-bold text-slate-800 notranslate hidden sm:block" translate="no">
             CRM <span className="text-slate-400 font-medium">Clínica</span>
           </h1>
         </div>
@@ -350,7 +350,7 @@ export default function HomePage() {
               ) : (
                 <div className="flex flex-1 items-center justify-center bg-[#EFEAE2] z-10">
                   <div className="text-center bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
-                    <img src="/logo.png" alt="Dent'up Odonto" className="h-16 w-auto mx-auto mb-4 object-contain" />
+                    <img src="/logo.png" alt="Dent'up Odonto" className="h-20 w-auto mx-auto mb-4 object-contain" />
                     <h3 className="text-xl font-bold text-slate-800 mb-2 notranslate">Dent'up Inbox</h3>
                     <p className="text-base text-slate-500">Selecione uma conversa à esquerda<br/>para iniciar o atendimento.</p>
                   </div>
