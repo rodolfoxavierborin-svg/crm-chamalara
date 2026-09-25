@@ -173,34 +173,34 @@ export default function HomePage() {
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans notranslate" translate="no">
       
-      {/* HEADER PRINCIPAL COM LOGO DOBRADA */}
-      <div className="bg-white border-b border-slate-200 px-6 py-2 flex items-center justify-between z-20 shadow-sm">
+      {/* HEADER COMPACTO E SLIM (ALTURA FIXA h-16) */}
+      <div className="bg-white border-b border-slate-200 px-6 h-16 shrink-0 flex items-center justify-between z-20 shadow-sm">
         <div className="flex items-center gap-4">
-          <img src="/logo.png" alt="Dent'up Odonto" className="h-24 md:h-28 w-auto object-contain" />
-          <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
-          <h1 className="text-xl font-bold text-slate-800 notranslate hidden sm:block" translate="no">
+          <img src="/logo.png" alt="Dent'up Odonto" className="h-10 w-auto object-contain" />
+          <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
+          <h1 className="text-base font-bold text-slate-800 notranslate hidden sm:block" translate="no">
             CRM <span className="text-slate-400 font-medium">Clínica</span>
           </h1>
         </div>
         
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-5">
           {/* BOTÕES DE NAVEGAÇÃO */}
           <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
-            <button onClick={() => setAbaAtiva('chat')} className={`px-5 py-2 rounded-md text-sm font-bold transition-all notranslate ${abaAtiva === 'chat' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            <button onClick={() => setAbaAtiva('chat')} className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all notranslate ${abaAtiva === 'chat' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               Chat (Mensagens)
             </button>
-            <button onClick={() => setAbaAtiva('kanban')} className={`px-5 py-2 rounded-md text-sm font-bold transition-all notranslate ${abaAtiva === 'kanban' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            <button onClick={() => setAbaAtiva('kanban')} className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all notranslate ${abaAtiva === 'kanban' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               Quadro CRM
             </button>
           </div>
 
           {/* PERFIL DO USUÁRIO LOGADO E BOTÃO SAIR */}
-          <div className="flex items-center gap-3 border-l border-slate-200 pl-6">
+          <div className="flex items-center gap-3 border-l border-slate-200 pl-5">
             <div className="text-right hidden sm:block">
               <p className="text-xs font-bold text-slate-800 notranslate">{userProfile?.nome || 'Usuário'}</p>
-              <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded uppercase notranslate">{userProfile?.cargo || 'admin'}</span>
+              <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate">{userProfile?.cargo || 'admin'}</span>
             </div>
-            <button onClick={handleLogout} title="Encerrar Sessão" className="p-2 text-slate-400 hover:text-red-600 transition-colors rounded-lg hover:bg-red-50">
+            <button onClick={handleLogout} title="Encerrar Sessão" className="p-1.5 text-slate-400 hover:text-red-600 transition-colors rounded-lg hover:bg-red-50">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
             </button>
           </div>
@@ -215,9 +215,9 @@ export default function HomePage() {
             
             {/* SIDEBAR DE CONVERSAS */}
             <div className={`w-full md:w-[380px] border-r border-slate-200 bg-white flex flex-col ${selectedLead ? 'hidden md:flex' : 'flex'}`}>
-              <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center h-[70px]">
-                <h2 className="text-lg font-bold text-slate-800 notranslate">Mensagens</h2>
-                <span className="text-sm bg-blue-100 text-blue-700 font-bold px-3 py-1 rounded-full">{sortedLeads.length}</span>
+              <div className="p-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center h-[56px] shrink-0">
+                <h2 className="text-base font-bold text-slate-800 notranslate">Mensagens</h2>
+                <span className="text-xs bg-blue-100 text-blue-700 font-bold px-2.5 py-0.5 rounded-full">{sortedLeads.length}</span>
               </div>
               <ul className="flex-1 overflow-y-auto bg-white custom-scrollbar">
                 {sortedLeads.map((lead) => {
@@ -227,26 +227,26 @@ export default function HomePage() {
 
                   return (
                     <li key={lead.id} onClick={() => setSelectedLead(lead)}
-                      className={`cursor-pointer p-4 transition-all border-b border-slate-100 flex gap-3.5 items-center ${
+                      className={`cursor-pointer p-3 transition-all border-b border-slate-100 flex gap-3 items-center ${
                         isSelected ? 'bg-blue-50/80' : 'hover:bg-slate-50'
                       }`}
                     >
                       {photo ? (
-                        <img src={photo} alt={lead.name || 'Paciente'} className="w-12 h-12 rounded-full object-cover shrink-0 shadow-sm" />
+                        <img src={photo} alt={lead.name || 'Paciente'} className="w-10 h-10 rounded-full object-cover shrink-0 shadow-sm" />
                       ) : (
-                        <div className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg shrink-0">
+                        <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-base shrink-0">
                           {lead.name ? lead.name.charAt(0).toUpperCase() : 'P'}
                         </div>
                       )}
                       
                       <div className="flex-1 min-w-0">
-                        <div className="flex justify-between items-baseline mb-1">
-                          <p className={`font-semibold text-base truncate ${isSelected ? 'text-slate-900' : 'text-slate-800'}`}>{lead.name || 'Sem Nome'}</p>
-                          <span className="text-xs text-slate-400 whitespace-nowrap ml-2">{formatarHorario(ultimaInteracao)}</span>
+                        <div className="flex justify-between items-baseline mb-0.5">
+                          <p className={`font-semibold text-sm truncate ${isSelected ? 'text-slate-900' : 'text-slate-800'}`}>{lead.name || 'Sem Nome'}</p>
+                          <span className="text-[11px] text-slate-400 whitespace-nowrap ml-2">{formatarHorario(ultimaInteracao)}</span>
                         </div>
                         <div className="flex justify-between items-center">
-                          <p className="text-sm text-slate-500 truncate">{lead.phone || lead.phone_number}</p>
-                          {lead.is_paused && <span className="bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase ml-2 shrink-0 notranslate">Humano</span>}
+                          <p className="text-xs text-slate-500 truncate">{lead.phone || lead.phone_number}</p>
+                          {lead.is_paused && <span className="bg-slate-800 text-white text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ml-2 shrink-0 notranslate">Humano</span>}
                         </div>
                       </div>
                     </li>
@@ -261,27 +261,27 @@ export default function HomePage() {
 
               {selectedLead ? (
                 <>
-                  <div className="bg-slate-50 border-b border-slate-200 p-4 h-[70px] flex justify-between items-center z-10">
-                    <div className="flex items-center gap-3.5">
+                  <div className="bg-slate-50 border-b border-slate-200 px-4 h-[56px] shrink-0 flex justify-between items-center z-10">
+                    <div className="flex items-center gap-3">
                       <button onClick={() => setSelectedLead(null)} className="md:hidden text-slate-500">
                         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg>
                       </button>
 
                       {selectedLead.avatar_url || selectedLead.photo_url || selectedLead.profile_pic ? (
-                        <img src={selectedLead.avatar_url || selectedLead.photo_url || selectedLead.profile_pic} alt={selectedLead.name} className="w-11 h-11 rounded-full object-cover shadow-sm" />
+                        <img src={selectedLead.avatar_url || selectedLead.photo_url || selectedLead.profile_pic} alt={selectedLead.name} className="w-9 h-9 rounded-full object-cover shadow-sm" />
                       ) : (
-                        <div className="w-11 h-11 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg">
+                        <div className="w-9 h-9 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-base">
                           {selectedLead.name ? selectedLead.name.charAt(0).toUpperCase() : 'P'}
                         </div>
                       )}
 
                       <div>
-                        <h2 className="text-base font-bold text-slate-800">{selectedLead.name || 'Sem Nome'}</h2>
-                        <span className="text-sm text-slate-500">{selectedLead.phone || selectedLead.phone_number}</span>
+                        <h2 className="text-sm font-bold text-slate-800">{selectedLead.name || 'Sem Nome'}</h2>
+                        <span className="text-xs text-slate-500">{selectedLead.phone || selectedLead.phone_number}</span>
                       </div>
                     </div>
 
-                    <button onClick={togglePauseAI} className={`px-5 py-2 rounded-lg font-bold text-sm transition-all border shadow-sm notranslate ${
+                    <button onClick={togglePauseAI} className={`px-4 py-1.5 rounded-lg font-bold text-xs transition-all border shadow-sm notranslate ${
                         selectedLead.is_paused 
                           ? 'bg-red-500 text-white border-red-600 hover:bg-red-600' 
                           : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
@@ -291,7 +291,7 @@ export default function HomePage() {
                     </button>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto p-6 space-y-4 relative z-10 custom-scrollbar">
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3 relative z-10 custom-scrollbar">
                     {messages.map((msg) => {
                       const msgType = msg.message?.type || msg.type;
                       const rawContent = msg.message?.content || msg.message?.data?.content || msg.content;
@@ -307,19 +307,19 @@ export default function HomePage() {
                             if (isMensagemTecnica(texto)) return null;
                             return (
                               <div key={`${msg.id}-${index}`} className={`flex ${isPatient ? 'justify-start' : 'justify-end'}`}>
-                                <div className={`max-w-[85%] md:max-w-lg rounded-2xl p-4 shadow-sm relative ${
+                                <div className={`max-w-[85%] md:max-w-md rounded-2xl p-3 shadow-sm relative ${
                                     isPatient ? 'bg-white text-slate-800 rounded-tl-none border border-slate-100/80' : 'bg-[#D9FDD3] text-slate-800 rounded-tr-none'
                                   }`}
                                 >
-                                  <span className={`block text-xs font-bold mb-1.5 notranslate ${
+                                  <span className={`block text-[11px] font-bold mb-1 notranslate ${
                                     isPatient ? 'text-slate-400' : isAI ? 'text-emerald-700' : 'text-emerald-800'
                                   }`}>
                                     {isPatient ? 'Paciente' : isAI ? 'Lara (IA)' : 'Você (Atendente)'}
                                   </span>
 
-                                  <p className="text-base whitespace-pre-wrap break-words leading-relaxed">{texto}</p>
+                                  <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{texto}</p>
 
-                                  <span className="block text-[11px] text-right mt-2 text-slate-400">
+                                  <span className="block text-[10px] text-right mt-1.5 text-slate-400">
                                     {new Date(msg.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                   </span>
                                 </div>
@@ -332,27 +332,27 @@ export default function HomePage() {
                     <div ref={messagesEndRef} />
                   </div>
 
-                  <div className="p-4 bg-slate-50 h-[80px] flex items-center z-10 border-t border-slate-200">
-                    <div className="flex items-center space-x-3 w-full max-w-5xl mx-auto">
-                      <div className="flex-1 bg-white rounded-full p-2 flex items-center shadow-sm border border-slate-300 focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500 transition-all">
+                  <div className="p-3 bg-slate-50 h-[64px] shrink-0 flex items-center z-10 border-t border-slate-200">
+                    <div className="flex items-center space-x-2 w-full max-w-5xl mx-auto">
+                      <div className="flex-1 bg-white rounded-full p-1.5 flex items-center shadow-sm border border-slate-300 focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500 transition-all">
                         <input
                           type="text" placeholder="Digite uma mensagem..."
-                          className="flex-1 bg-transparent px-4 py-2 text-base text-slate-800 outline-none"
+                          className="flex-1 bg-transparent px-3 py-1 text-sm text-slate-800 outline-none"
                           value={newMessage} onChange={(e) => setNewMessage(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                         />
                       </div>
-                      <button onClick={handleSendMessage} className="bg-[#00A884] text-white w-12 h-12 rounded-full flex items-center justify-center hover:bg-[#008f70] transition-colors shadow-sm shrink-0">
-                        <svg className="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path></svg>
+                      <button onClick={handleSendMessage} className="bg-[#00A884] text-white w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#008f70] transition-colors shadow-sm shrink-0">
+                        <svg className="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path></svg>
                       </button>
                     </div>
                   </div>
                 </>
               ) : (
                 <div className="flex flex-1 items-center justify-center bg-[#EFEAE2] z-10">
-                  <div className="text-center bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
-                    <img src="/logo.png" alt="Dent'up Odonto" className="h-20 w-auto mx-auto mb-4 object-contain" />
-                    <h3 className="text-xl font-bold text-slate-800 mb-2 notranslate">Dent'up Inbox</h3>
-                    <p className="text-base text-slate-500">Selecione uma conversa à esquerda<br/>para iniciar o atendimento.</p>
+                  <div className="text-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                    <img src="/logo.png" alt="Dent'up Odonto" className="h-14 w-auto mx-auto mb-3 object-contain" />
+                    <h3 className="text-lg font-bold text-slate-800 mb-1 notranslate">Dent'up Inbox</h3>
+                    <p className="text-sm text-slate-500">Selecione uma conversa à esquerda<br/>para iniciar o atendimento.</p>
                   </div>
                 </div>
               )}
@@ -362,7 +362,7 @@ export default function HomePage() {
       </div>
       
       <style dangerouslySetInnerHTML={{__html: `
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
