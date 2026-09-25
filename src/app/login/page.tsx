@@ -17,7 +17,6 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      // 1. Chama a autenticação nativa do Supabase
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -30,7 +29,6 @@ export default function LoginPage() {
       }
 
       if (data.user) {
-        // 2. Login bem sucedido! Redireciona para o CRM na raiz
         router.push('/');
         router.refresh();
       }
@@ -51,7 +49,7 @@ export default function LoginPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">Dent'up Clínica</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Dent'up Odontologia</h1>
           <p className="text-blue-100 text-sm mt-1">Plataforma Integrada de CRM & Atendimento</p>
         </div>
 
@@ -105,14 +103,14 @@ export default function LoginPage() {
                 <span>Autenticando...</span>
               </>
             ) : (
-              <span>Entrar no CRM</span>
+              <span>Acessar o CRM</span>
             )}
           </button>
         </form>
 
         <div className="bg-slate-50 border-t border-slate-200 px-8 py-4 text-center">
           <p className="text-xs text-slate-400 font-medium">
-            Ambiente Seguro • Dent'up Odontologia
+            Ambiente Seguro • Odontologia Dent'up
           </p>
         </div>
 
