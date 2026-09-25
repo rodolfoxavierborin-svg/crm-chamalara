@@ -39,17 +39,15 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans">
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans notranslate" translate="no">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
         
-        {/* CABEÇALHO DA TELA DE LOGIN */}
+        {/* CABEÇALHO DA TELA DE LOGIN COM A LOGO OFICIAL */}
         <div className="bg-blue-600 p-8 text-white text-center">
-          <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-4 backdrop-blur-sm border border-white/20 shadow-inner">
-            <svg className="w-9 h-9 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-            </svg>
+          <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg p-2">
+            <img src="/logo.png" alt="Dent'up Odonto" className="w-full h-full object-contain" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">Dent'up Odontologia</h1>
+          <h1 className="text-2xl font-bold tracking-tight notranslate">Dent'up Odontologia</h1>
           <p className="text-blue-100 text-sm mt-1">Plataforma Integrada de CRM & Atendimento</p>
         </div>
 
@@ -92,7 +90,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50 notranslate"
           >
             {loading ? (
               <>
@@ -103,13 +101,13 @@ export default function LoginPage() {
                 <span>Autenticando...</span>
               </>
             ) : (
-              <span>Acessar</span>
+              <span>Acessar o CRM</span>
             )}
           </button>
         </form>
 
         <div className="bg-slate-50 border-t border-slate-200 px-8 py-4 text-center">
-          <p className="text-xs text-slate-400 font-medium">
+          <p className="text-xs text-slate-400 font-medium notranslate">
             Ambiente Seguro • Odontologia Dent'up
           </p>
         </div>
