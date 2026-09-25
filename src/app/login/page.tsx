@@ -103,7 +103,7 @@ export default function LoginPage() {
                 <span>Autenticando...</span>
               </>
             ) : (
-              <span>Acessar o CRM</span>
+              <span>Acessar</span>
             )}
           </button>
         </form>

@@ -47,12 +47,10 @@ export default function HomePage() {
       const { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
-        // Se não estiver logado, redireciona para a tela de login
         router.push('/login');
         return;
       }
 
-      // Busca os dados do perfil (cargo, nome, unidade)
       const { data: profile } = await supabase
         .from('dentup_profiles')
         .select('*')
@@ -66,7 +64,7 @@ export default function HomePage() {
     checkUser();
   }, [router]);
 
-  // 2. BUSCA DE LEADS (Apenas executa após confirmar autenticação)
+  // 2. BUSCA DE LEADS
   useEffect(() => {
     if (loadingAuth) return;
 
@@ -173,7 +171,7 @@ export default function HomePage() {
   const sortedLeads = [...leads].sort((a, b) => getUltimaInteracao(b) - getUltimaInteracao(a));
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans">
+    <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans notranslate" translate="no">
       
       {/* HEADER PRINCIPAL */}
       <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-20 shadow-sm">
@@ -181,16 +179,18 @@ export default function HomePage() {
           <div className="w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center font-bold text-lg shadow-sm">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
           </div>
-          <h1 className="text-xl font-bold text-slate-800">Dent'up <span className="text-slate-400 font-medium">Clínica</span></h1>
+          <h1 className="text-xl font-bold text-slate-800 notranslate" translate="no">
+            Dent'up <span className="text-slate-400 font-medium">Clínica</span>
+          </h1>
         </div>
         
         <div className="flex items-center gap-6">
           {/* BOTÕES DE NAVEGAÇÃO */}
           <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
-            <button onClick={() => setAbaAtiva('chat')} className={`px-5 py-2 rounded-md text-sm font-bold transition-all ${abaAtiva === 'chat' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            <button onClick={() => setAbaAtiva('chat')} className={`px-5 py-2 rounded-md text-sm font-bold transition-all notranslate ${abaAtiva === 'chat' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               Chat (Mensagens)
             </button>
-            <button onClick={() => setAbaAtiva('kanban')} className={`px-5 py-2 rounded-md text-sm font-bold transition-all ${abaAtiva === 'kanban' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            <button onClick={() => setAbaAtiva('kanban')} className={`px-5 py-2 rounded-md text-sm font-bold transition-all notranslate ${abaAtiva === 'kanban' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               Quadro CRM
             </button>
           </div>
@@ -198,8 +198,8 @@ export default function HomePage() {
           {/* PERFIL DO USUÁRIO LOGADO E BOTÃO SAIR */}
           <div className="flex items-center gap-3 border-l border-slate-200 pl-6">
             <div className="text-right hidden sm:block">
-              <p className="text-xs font-bold text-slate-800">{userProfile?.nome || 'Usuário'}</p>
-              <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded uppercase">{userProfile?.cargo || 'admin'}</span>
+              <p className="text-xs font-bold text-slate-800 notranslate">{userProfile?.nome || 'Usuário'}</p>
+              <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded uppercase notranslate">{userProfile?.cargo || 'admin'}</span>
             </div>
             <button onClick={handleLogout} title="Encerrar Sessão" className="p-2 text-slate-400 hover:text-red-600 transition-colors rounded-lg hover:bg-red-50">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
@@ -217,7 +217,7 @@ export default function HomePage() {
             {/* SIDEBAR DE CONVERSAS */}
             <div className={`w-full md:w-[380px] border-r border-slate-200 bg-white flex flex-col ${selectedLead ? 'hidden md:flex' : 'flex'}`}>
               <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center h-[70px]">
-                <h2 className="text-lg font-bold text-slate-800">Mensagens</h2>
+                <h2 className="text-lg font-bold text-slate-800 notranslate">Mensagens</h2>
                 <span className="text-sm bg-blue-100 text-blue-700 font-bold px-3 py-1 rounded-full">{sortedLeads.length}</span>
               </div>
               <ul className="flex-1 overflow-y-auto bg-white custom-scrollbar">
@@ -247,7 +247,7 @@ export default function HomePage() {
                         </div>
                         <div className="flex justify-between items-center">
                           <p className="text-sm text-slate-500 truncate">{lead.phone || lead.phone_number}</p>
-                          {lead.is_paused && <span className="bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase ml-2 shrink-0">Humano</span>}
+                          {lead.is_paused && <span className="bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase ml-2 shrink-0 notranslate">Humano</span>}
                         </div>
                       </div>
                     </li>
@@ -282,7 +282,7 @@ export default function HomePage() {
                       </div>
                     </div>
 
-                    <button onClick={togglePauseAI} className={`px-5 py-2 rounded-lg font-bold text-sm transition-all border shadow-sm ${
+                    <button onClick={togglePauseAI} className={`px-5 py-2 rounded-lg font-bold text-sm transition-all border shadow-sm notranslate ${
                         selectedLead.is_paused 
                           ? 'bg-red-500 text-white border-red-600 hover:bg-red-600' 
                           : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
@@ -312,7 +312,7 @@ export default function HomePage() {
                                     isPatient ? 'bg-white text-slate-800 rounded-tl-none border border-slate-100/80' : 'bg-[#D9FDD3] text-slate-800 rounded-tr-none'
                                   }`}
                                 >
-                                  <span className={`block text-xs font-bold mb-1.5 ${
+                                  <span className={`block text-xs font-bold mb-1.5 notranslate ${
                                     isPatient ? 'text-slate-400' : isAI ? 'text-emerald-700' : 'text-emerald-800'
                                   }`}>
                                     {isPatient ? 'Paciente' : isAI ? 'Lara (IA)' : 'Você (Atendente)'}
@@ -354,7 +354,7 @@ export default function HomePage() {
                     <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
                       <svg className="w-8 h-8 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                     </div>
-                    <h3 className="text-xl font-bold text-slate-800 mb-2">Dent'up Inbox</h3>
+                    <h3 className="text-xl font-bold text-slate-800 mb-2 notranslate">Dent'up Inbox</h3>
                     <p className="text-base text-slate-500">Selecione uma conversa à esquerda<br/>para iniciar o atendimento.</p>
                   </div>
                 </div>
