@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 
 export default function LoginPage() {
@@ -9,7 +8,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,8 +27,8 @@ export default function LoginPage() {
       }
 
       if (data.user) {
-        router.push('/');
-        router.refresh();
+        // Redireciona via window.location para recarregar e enviar os Cookies ao Middleware
+        window.location.href = '/';
       }
     } catch (err: any) {
       setErrorMsg('Ocorreu um erro ao tentar fazer login.');
