@@ -126,7 +126,7 @@ export default function HomePage() {
     }
   };
 
-  // 2. BUSCA DE LEADS E ESCUTA EM TEMPO REAL GLOBAL (LEADS & SIDEBAR RE-ORDER)
+  // 2. BUSCA DE LEADS E ESCUTA EM TEMPO REAL GLOBAL
   useEffect(() => {
     if (loadingAuth) return;
 
@@ -142,7 +142,6 @@ export default function HomePage() {
     };
     fetchLeads();
 
-    // Escuta alterações na tabela dentup_leads
     const leadsChannel = supabase
       .channel('leads-global-channel')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_leads' }, (payload: any) => {
@@ -157,7 +156,6 @@ export default function HomePage() {
       })
       .subscribe();
 
-    // Escuta TODAS as mensagens recebidas para subir o lead correspondente no topo do sidebar na hora
     const globalMessagesChannel = supabase
       .channel('global-messages-sidebar-channel')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
@@ -188,7 +186,7 @@ export default function HomePage() {
     };
   }, [loadingAuth]);
 
-  // 3. BUSCA E ESCUTA DE MENSAGENS EM TEMPO REAL (MENSAGENS DO CHAT SELECIONADO)
+  // 3. BUSCA E ESCUTA DE MENSAGENS EM TEMPO REAL
   useEffect(() => {
     if (!selectedLead || loadingAuth) return;
 
@@ -200,7 +198,6 @@ export default function HomePage() {
 
     const targetSessionId = `dentup_${cleanPhone}`;
 
-    // Busca inicial de mensagens do paciente selecionado
     const fetchMessages = async () => {
       const { data, error } = await supabase
         .from('dentup_messages')
@@ -213,7 +210,6 @@ export default function HomePage() {
 
     fetchMessages();
 
-    // Inscrição em tempo real com filtro direto no Supabase para máxima velocidade
     const channelName = `chat_messages_${cleanPhone}`;
     const messagesChannel = supabase
       .channel(channelName)
@@ -229,10 +225,8 @@ export default function HomePage() {
           const newMsg = payload.new;
           if (newMsg) {
             setMessages((prev) => {
-              // Se a mensagem já existe pelo ID, ignora
               if (prev.some((m) => m.id === newMsg.id)) return prev;
 
-              // Substitui mensagem temporária otimista enviada pelo humano
               const tempIndex = prev.findIndex((m) => m.id.toString().startsWith('temp-'));
               if (tempIndex !== -1) {
                 const updated = [...prev];
@@ -328,7 +322,6 @@ export default function HomePage() {
   const isAdmin = userProfile?.cargo?.toLowerCase() === 'admin' || userProfile?.cargo?.toLowerCase() === 'administrador';
   const userUnidade = userProfile?.unidade || 'Todas';
 
-  // REGRA DE RESTRICÃO POR UNIDADE PARA O CHAT
   const sortedLeads = [...leads]
     .filter((lead) => {
       if (isAdmin || !userUnidade || userUnidade === 'Todas') return true;
@@ -340,21 +333,23 @@ export default function HomePage() {
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans notranslate" translate="no">
       
-      {/* HEADER COMPACTO */}
-      <div className="bg-white border-b border-slate-200 px-6 h-16 shrink-0 flex items-center justify-between z-20 shadow-sm">
-        <div className="flex items-center gap-4">
-          <img src="/logo.png" alt="Dent'up Odonto" className="h-10 w-auto object-contain" />
-          <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
-          <h1 className="text-base font-bold text-slate-800 notranslate hidden sm:block" translate="no">
+      {/* HEADER ULTRA LIMPO NO MOBILE E COMPLETO NO DESKTOP */}
+      <div className="bg-white border-b border-slate-200 px-4 md:px-6 h-14 md:h-16 shrink-0 flex items-center justify-between z-20 shadow-sm">
+        <div className="flex items-center gap-3">
+          <img src="/logo.png" alt="Dent'up Odonto" className="h-8 md:h-10 w-auto object-contain" />
+          <div className="h-5 w-px bg-slate-200 hidden sm:block"></div>
+          <h1 className="text-sm md:text-base font-bold text-slate-800 notranslate hidden sm:block" translate="no">
             CRM <span className="text-slate-400 font-medium">Clínica</span>
           </h1>
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 md:gap-4">
+          
+          {/* BOTÃO GERENCIAR EQUIPE (ESCONDIDO NO MOBILE -> VISÍVEL SÓ NO DESKTOP `hidden md:flex`) */}
           {isAdmin && (
             <button
               onClick={() => setShowTeamModal(true)}
-              className="bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 hover:border-blue-300 px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5"
+              className="hidden md:flex bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 hover:border-blue-300 px-3 py-1.5 rounded-md text-xs font-bold transition-all items-center gap-1.5"
             >
               <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -363,7 +358,8 @@ export default function HomePage() {
             </button>
           )}
 
-          <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+          {/* BOTÕES DE NAVEGAÇÃO CHAT / KANBAN (ESCONDIDOS NO MOBILE -> VISÍVEIS SÓ NO DESKTOP `hidden md:flex`) */}
+          <div className="hidden md:flex bg-slate-100 p-1 rounded-lg border border-slate-200">
             <button onClick={() => setAbaAtiva('chat')} className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all notranslate ${abaAtiva === 'chat' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               Chat (Mensagens)
             </button>
@@ -372,13 +368,14 @@ export default function HomePage() {
             </button>
           </div>
 
-          <div className="flex items-center gap-3 border-l border-slate-200 pl-4">
-            <div className="text-right hidden sm:block">
+          {/* PERFIL E BOTÃO SAIR */}
+          <div className="flex items-center gap-2 md:gap-3 border-l border-slate-200 pl-3 md:pl-4">
+            <div className="text-right">
               <p className="text-xs font-bold text-slate-800 notranslate">{userProfile?.nome || 'Usuário'}</p>
               <div className="flex items-center justify-end gap-1">
-                <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate">{userProfile?.cargo || 'atendente'}</span>
+                <span className="text-[9px] md:text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate">{userProfile?.cargo || 'atendente'}</span>
                 {userUnidade !== 'Todas' && (
-                  <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate">{userUnidade}</span>
+                  <span className="text-[9px] md:text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate">{userUnidade}</span>
                 )}
               </div>
             </div>
@@ -397,9 +394,9 @@ export default function HomePage() {
             
             {/* SIDEBAR DE CONVERSAS */}
             <div className={`w-full md:w-[380px] border-r border-slate-200 bg-white flex flex-col ${selectedLead ? 'hidden md:flex' : 'flex'}`}>
-              <div className="p-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center h-[56px] shrink-0">
+              <div className="p-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center h-[52px] md:h-[56px] shrink-0">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-base font-bold text-slate-800 notranslate">Mensagens</h2>
+                  <h2 className="text-sm md:text-base font-bold text-slate-800 notranslate">Mensagens</h2>
                   {!isAdmin && userUnidade !== 'Todas' && (
                     <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">{userUnidade}</span>
                   )}
@@ -448,27 +445,27 @@ export default function HomePage() {
 
               {selectedLead ? (
                 <>
-                  <div className="bg-slate-50 border-b border-slate-200 px-4 h-[56px] shrink-0 flex justify-between items-center z-10">
+                  <div className="bg-slate-50 border-b border-slate-200 px-4 h-[52px] md:h-[56px] shrink-0 flex justify-between items-center z-10">
                     <div className="flex items-center gap-3">
-                      <button onClick={() => setSelectedLead(null)} className="md:hidden text-slate-500">
+                      <button onClick={() => setSelectedLead(null)} className="md:hidden text-slate-500 pr-1">
                         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg>
                       </button>
 
                       {selectedLead.avatar_url || selectedLead.photo_url || selectedLead.profile_pic ? (
-                        <img src={selectedLead.avatar_url || selectedLead.photo_url || selectedLead.profile_pic} alt={selectedLead.name} className="w-9 h-9 rounded-full object-cover shadow-sm" />
+                        <img src={selectedLead.avatar_url || selectedLead.photo_url || selectedLead.profile_pic} alt={selectedLead.name} className="w-8 h-8 md:w-9 md:h-9 rounded-full object-cover shadow-sm" />
                       ) : (
-                        <div className="w-9 h-9 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-base">
+                        <div className="w-8 h-8 md:w-9 md:h-9 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm md:text-base">
                           {selectedLead.name ? selectedLead.name.charAt(0).toUpperCase() : 'P'}
                         </div>
                       )}
 
                       <div>
-                        <h2 className="text-sm font-bold text-slate-800">{selectedLead.name || 'Sem Nome'}</h2>
-                        <span className="text-xs text-slate-500">{selectedLead.phone || selectedLead.phone_number}</span>
+                        <h2 className="text-xs md:text-sm font-bold text-slate-800">{selectedLead.name || 'Sem Nome'}</h2>
+                        <span className="text-[11px] md:text-xs text-slate-500">{selectedLead.phone || selectedLead.phone_number}</span>
                       </div>
                     </div>
 
-                    <button onClick={togglePauseAI} className={`px-4 py-1.5 rounded-lg font-bold text-xs transition-all border shadow-sm notranslate ${
+                    <button onClick={togglePauseAI} className={`px-3 py-1 md:px-4 md:py-1.5 rounded-lg font-bold text-xs transition-all border shadow-sm notranslate ${
                         selectedLead.is_paused 
                           ? 'bg-red-500 text-white border-red-600 hover:bg-red-600' 
                           : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
@@ -478,7 +475,7 @@ export default function HomePage() {
                     </button>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto p-4 space-y-3 relative z-10 custom-scrollbar">
+                  <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-3 relative z-10 custom-scrollbar">
                     {messages.map((msg) => {
                       const msgType = msg.message?.type || msg.type;
                       const rawContent = msg.message?.content || msg.message?.data?.content || msg.content;
@@ -519,16 +516,16 @@ export default function HomePage() {
                     <div ref={messagesEndRef} />
                   </div>
 
-                  <div className="p-3 bg-slate-50 h-[64px] shrink-0 flex items-center z-10 border-t border-slate-200">
+                  <div className="p-2.5 md:p-3 bg-slate-50 h-[58px] md:h-[64px] shrink-0 flex items-center z-10 border-t border-slate-200">
                     <div className="flex items-center space-x-2 w-full max-w-5xl mx-auto">
-                      <div className="flex-1 bg-white rounded-full p-1.5 flex items-center shadow-sm border border-slate-300 focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500 transition-all">
+                      <div className="flex-1 bg-white rounded-full p-1 md:p-1.5 flex items-center shadow-sm border border-slate-300 focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500 transition-all">
                         <input
                           type="text" placeholder="Digite uma mensagem..."
                           className="flex-1 bg-transparent px-3 py-1 text-sm text-slate-800 outline-none"
                           value={newMessage} onChange={(e) => setNewMessage(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                         />
                       </div>
-                      <button onClick={handleSendMessage} className="bg-[#00A884] text-white w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#008f70] transition-colors shadow-sm shrink-0">
+                      <button onClick={handleSendMessage} className="bg-[#00A884] text-white w-9 h-9 md:w-10 md:h-10 rounded-full flex items-center justify-center hover:bg-[#008f70] transition-colors shadow-sm shrink-0">
                         <svg className="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path></svg>
                       </button>
                     </div>
