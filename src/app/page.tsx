@@ -69,7 +69,7 @@ export default function HomePage() {
         .eq('id', session.user.id)
         .single();
 
-      setUserProfile(profile || { nome: session.user.email, cargo: 'admin' });
+      setUserProfile(profile || { nome: session.user.email, cargo: 'admin', unidade: 'Todas' });
       setLoadingAuth(false);
     };
 
@@ -230,10 +230,17 @@ export default function HomePage() {
     );
   }
 
-  const sortedLeads = [...leads].sort((a, b) => getUltimaInteracao(b) - getUltimaInteracao(a));
-  
-  // VALIDAÇÃO FLEXÍVEL DE CARGO ADMIN (CASE-INSENSITIVE)
   const isAdmin = userProfile?.cargo?.toLowerCase() === 'admin' || userProfile?.cargo?.toLowerCase() === 'administrador';
+  const userUnidade = userProfile?.unidade || 'Todas';
+
+  // REGRA DE RESTRICÃO POR UNIDADE PARA O CHAT
+  const sortedLeads = [...leads]
+    .filter((lead) => {
+      if (isAdmin || !userUnidade || userUnidade === 'Todas') return true;
+      const leadUnidade = lead.unidade || lead.unit || 'Sem Unidade';
+      return leadUnidade.toLowerCase() === userUnidade.toLowerCase();
+    })
+    .sort((a, b) => getUltimaInteracao(b) - getUltimaInteracao(a));
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans notranslate" translate="no">
@@ -276,7 +283,12 @@ export default function HomePage() {
           <div className="flex items-center gap-3 border-l border-slate-200 pl-4">
             <div className="text-right hidden sm:block">
               <p className="text-xs font-bold text-slate-800 notranslate">{userProfile?.nome || 'Usuário'}</p>
-              <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate">{userProfile?.cargo || 'admin'}</span>
+              <div className="flex items-center justify-end gap-1">
+                <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate">{userProfile?.cargo || 'atendente'}</span>
+                {userUnidade !== 'Todas' && (
+                  <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate">{userUnidade}</span>
+                )}
+              </div>
             </div>
             <button onClick={handleLogout} title="Encerrar Sessão" className="p-1.5 text-slate-400 hover:text-red-600 transition-colors rounded-lg hover:bg-red-50">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
@@ -287,14 +299,19 @@ export default function HomePage() {
 
       <div className="flex-1 overflow-hidden">
         {abaAtiva === 'kanban' ? (
-          <KanbanBoard onSelectLead={(lead) => { setSelectedLead(lead); setAbaAtiva('chat'); }} />
+          <KanbanBoard userProfile={userProfile} onSelectLead={(lead) => { setSelectedLead(lead); setAbaAtiva('chat'); }} />
         ) : (
           <div className="flex h-full w-full bg-white border-x border-slate-200">
             
             {/* SIDEBAR DE CONVERSAS */}
             <div className={`w-full md:w-[380px] border-r border-slate-200 bg-white flex flex-col ${selectedLead ? 'hidden md:flex' : 'flex'}`}>
               <div className="p-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center h-[56px] shrink-0">
-                <h2 className="text-base font-bold text-slate-800 notranslate">Mensagens</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-slate-800 notranslate">Mensagens</h2>
+                  {!isAdmin && userUnidade !== 'Todas' && (
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">{userUnidade}</span>
+                  )}
+                </div>
                 <span className="text-xs bg-blue-100 text-blue-700 font-bold px-2.5 py-0.5 rounded-full">{sortedLeads.length}</span>
               </div>
               <ul className="flex-1 overflow-y-auto bg-white custom-scrollbar">
