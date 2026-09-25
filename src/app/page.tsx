@@ -173,10 +173,10 @@ export default function HomePage() {
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans notranslate" translate="no">
       
-      {/* HEADER PRINCIPAL COM LOGO MAIOR */}
+      {/* HEADER PRINCIPAL COM LOGO DOBRADA */}
       <div className="bg-white border-b border-slate-200 px-6 py-2 flex items-center justify-between z-20 shadow-sm">
         <div className="flex items-center gap-4">
-          <img src="/logo.png" alt="Dent'up Odonto" className="h-12 md:h-14 w-auto object-contain" />
+          <img src="/logo.png" alt="Dent'up Odonto" className="h-24 md:h-28 w-auto object-contain" />
           <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
           <h1 className="text-xl font-bold text-slate-800 notranslate hidden sm:block" translate="no">
             CRM <span className="text-slate-400 font-medium">Clínica</span>
