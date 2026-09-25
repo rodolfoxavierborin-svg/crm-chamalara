@@ -144,7 +144,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     await supabase.from('dentup_leads').update({ [campo]: valor }).eq('id', leadDrawer.id);
   };
 
-  // FUNÇÃO PARA CRIAR UM NOVO PACIENTE MANUALMENTE
+  // FUNÇÃO PARA CRIAR UM NOVO PACIENTE MANUALMENTE (COLUNAS CORRIGIDAS)
   const handleCreatePatient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPatientForm.name || !newPatientForm.phone) {
@@ -157,17 +157,16 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     const payload = {
       name: newPatientForm.name,
       phone: newPatientForm.phone,
-      phone_number: newPatientForm.phone,
       unidade: newPatientForm.unidade,
       procedimento: newPatientForm.procedimento,
       promotor: newPatientForm.promotor,
       notas_internas: newPatientForm.notas_internas,
       status: 'novo',
-      is_paused: true, // Já entra como atendimento humano (pausado do robô)
+      is_paused: true,
       created_at: new Date().toISOString()
     };
 
-    const { data, error } = await supabase.from('dentup_leads').insert([payload]).select();
+    const { error } = await supabase.from('dentup_leads').insert([payload]).select();
 
     setSavingPatient(false);
 
@@ -363,12 +362,15 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
         {/* Filtros + Botão de Novo Paciente */}
         <div className="flex items-center gap-4">
           
-          {/* BOTÃO + NOVO PACIENTE */}
+          {/* BOTÃO + NOVO PACIENTE (ÍCONE SVG BRANCO PURO) */}
           <button
             onClick={() => setIsNewPatientModalOpen(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-sm transition-all shadow-md flex items-center gap-2"
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-sm transition-all shadow-md flex items-center gap-1.5"
           >
-            <span>➕</span> Novo Paciente
+            <svg className="w-4 h-4 text-white shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.8">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            <span>Novo Paciente</span>
           </button>
 
           <select
@@ -627,7 +629,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
-        {/* MODAL PARA CADASTRAR NOVO PACIENTE (MANUAL DA RUA / PROMOTOR) */}
+        {/* MODAL PARA CADASTRAR NOVO PACIENTE */}
         {isNewPatientModalOpen && (
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
