@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '../lib/supabase';
 import KanbanBoard from '../components/KanbanBoard';
 
@@ -19,19 +20,20 @@ const getUltimaInteracao = (lead: any) => {
   return rawDate ? new Date(rawDate).getTime() : 0;
 };
 
-// Filtro rigoroso para ocultar logs de chamadas técnicas de ferramentas da IA
 const isMensagemTecnica = (texto: string): boolean => {
   if (!texto || typeof texto !== 'string') return true;
   const t = texto.trim();
-  
   if (t.startsWith('[{') || t.startsWith('{"')) return true;
   if (t.startsWith('Calling ') || t.includes('with input:')) return true;
   if (t.includes('Confirmar_Agendamento') || t.includes('Create_an_event') || t.includes('Call_Sub-workflow')) return true;
-  
   return false;
 };
 
 export default function HomePage() {
+  const router = useRouter();
+  const [userProfile, setUserProfile] = useState<any | null>(null);
+  const [loadingAuth, setLoadingAuth] = useState(true);
+
   const [abaAtiva, setAbaAtiva] = useState<'chat' | 'kanban'>('chat');
   const [leads, setLeads] = useState<any[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
@@ -39,7 +41,35 @@ export default function HomePage() {
   const [newMessage, setNewMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // 1. CHECAGEM DE AUTENTICAÇÃO E SESSÃO
   useEffect(() => {
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        // Se não estiver logado, redireciona para a tela de login
+        router.push('/login');
+        return;
+      }
+
+      // Busca os dados do perfil (cargo, nome, unidade)
+      const { data: profile } = await supabase
+        .from('dentup_profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+
+      setUserProfile(profile || { nome: session.user.email, cargo: 'admin' });
+      setLoadingAuth(false);
+    };
+
+    checkUser();
+  }, [router]);
+
+  // 2. BUSCA DE LEADS (Apenas executa após confirmar autenticação)
+  useEffect(() => {
+    if (loadingAuth) return;
+
     const fetchLeads = async () => {
       const { data, error } = await supabase.from('dentup_leads').select('*');
       if (!error) {
@@ -51,37 +81,47 @@ export default function HomePage() {
       }
     };
     fetchLeads();
+
     const leadsChannel = supabase.channel('leads-channel').on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_leads' }, (payload: any) => {
       const newLead = payload.new as any;
       if (!newLead || !newLead.id) return;
-      
       setLeads((curr: any[]) => curr.find(l => l.id === newLead.id) ? curr.map(l => l.id === newLead.id ? newLead : l) : [...curr, newLead]);
       setSelectedLead((prev: any) => prev?.id === newLead.id ? newLead : prev);
     }).subscribe();
-    return () => { supabase.removeChannel(leadsChannel); };
-  }, []);
 
+    return () => { supabase.removeChannel(leadsChannel); };
+  }, [loadingAuth]);
+
+  // 3. BUSCA DE MENSAGENS
   useEffect(() => {
-    if (selectedLead) {
+    if (selectedLead && !loadingAuth) {
       const cleanPhone = (selectedLead.phone || selectedLead.phone_number || '').replace(/\D/g, '');
       const targetSessionId = `dentup_${cleanPhone}`;
+      
       const fetchMessages = async () => {
         if (!cleanPhone) { setMessages([]); return; }
         const { data, error } = await supabase.from('dentup_messages').select('*').eq('session_id', targetSessionId).order('created_at', { ascending: true });
         if (!error) setMessages(data || []);
       };
       fetchMessages();
+
       const messagesChannel = supabase.channel('messages-channel').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
         const newMsg = payload.new as any;
         if (newMsg && newMsg.session_id === targetSessionId) setMessages((prev: any[]) => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg]);
       }).subscribe();
+
       return () => { supabase.removeChannel(messagesChannel); };
     }
-  }, [selectedLead]);
+  }, [selectedLead, loadingAuth]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
+  };
 
   const togglePauseAI = async () => {
     if (!selectedLead) return;
@@ -119,12 +159,23 @@ export default function HomePage() {
     } catch (error) { console.error(error); }
   };
 
+  if (loadingAuth) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-sm font-semibold text-slate-500">Carregando ambiente seguro...</p>
+        </div>
+      </div>
+    );
+  }
+
   const sortedLeads = [...leads].sort((a, b) => getUltimaInteracao(b) - getUltimaInteracao(a));
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans">
       
-      {/* HEADER PRINCIPAL COM ALTERNÂNCIA DE ABAS */}
+      {/* HEADER PRINCIPAL */}
       <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-20 shadow-sm">
         <div className="flex items-center gap-4">
           <div className="w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center font-bold text-lg shadow-sm">
@@ -133,14 +184,27 @@ export default function HomePage() {
           <h1 className="text-xl font-bold text-slate-800">Dent'up <span className="text-slate-400 font-medium">Clínica</span></h1>
         </div>
         
-        {/* BOTÕES DE NAVEGAÇÃO ENTRE CHAT E KANBAN/ANALYTICS */}
-        <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
-          <button onClick={() => setAbaAtiva('chat')} className={`px-5 py-2 rounded-md text-sm font-bold transition-all ${abaAtiva === 'chat' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-            Chat (Mensagens)
-          </button>
-          <button onClick={() => setAbaAtiva('kanban')} className={`px-5 py-2 rounded-md text-sm font-bold transition-all ${abaAtiva === 'kanban' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-            Quadro CRM
-          </button>
+        <div className="flex items-center gap-6">
+          {/* BOTÕES DE NAVEGAÇÃO */}
+          <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+            <button onClick={() => setAbaAtiva('chat')} className={`px-5 py-2 rounded-md text-sm font-bold transition-all ${abaAtiva === 'chat' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              Chat (Mensagens)
+            </button>
+            <button onClick={() => setAbaAtiva('kanban')} className={`px-5 py-2 rounded-md text-sm font-bold transition-all ${abaAtiva === 'kanban' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              Quadro CRM
+            </button>
+          </div>
+
+          {/* PERFIL DO USUÁRIO LOGADO E BOTÃO SAIR */}
+          <div className="flex items-center gap-3 border-l border-slate-200 pl-6">
+            <div className="text-right hidden sm:block">
+              <p className="text-xs font-bold text-slate-800">{userProfile?.nome || 'Usuário'}</p>
+              <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded uppercase">{userProfile?.cargo || 'admin'}</span>
+            </div>
+            <button onClick={handleLogout} title="Encerrar Sessão" className="p-2 text-slate-400 hover:text-red-600 transition-colors rounded-lg hover:bg-red-50">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -232,7 +296,6 @@ export default function HomePage() {
                     {messages.map((msg) => {
                       const msgType = msg.message?.type || msg.type;
                       const rawContent = msg.message?.content || msg.message?.data?.content || msg.content;
-                      
                       if (isMensagemTecnica(rawContent)) return null;
 
                       const isPatient = msgType === 'human' || msgType === 'user';
@@ -243,13 +306,10 @@ export default function HomePage() {
                         <React.Fragment key={msg.id}>
                           {baloes.map((texto: string, index: number) => {
                             if (isMensagemTecnica(texto)) return null;
-
                             return (
                               <div key={`${msg.id}-${index}`} className={`flex ${isPatient ? 'justify-start' : 'justify-end'}`}>
                                 <div className={`max-w-[85%] md:max-w-lg rounded-2xl p-4 shadow-sm relative ${
-                                    isPatient 
-                                      ? 'bg-white text-slate-800 rounded-tl-none border border-slate-100/80' 
-                                      : 'bg-[#D9FDD3] text-slate-800 rounded-tr-none'
+                                    isPatient ? 'bg-white text-slate-800 rounded-tl-none border border-slate-100/80' : 'bg-[#D9FDD3] text-slate-800 rounded-tr-none'
                                   }`}
                                 >
                                   <span className={`block text-xs font-bold mb-1.5 ${
