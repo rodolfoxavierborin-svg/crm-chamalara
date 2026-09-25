@@ -88,7 +88,7 @@ export default function HomePage() {
     }
   }, [showTeamModal]);
 
-  // CADASTRAR NOVO MEMBRO VIA NOSSA API DE SERVIDOR
+  // CADASTRAR NOVO MEMBRO VIA API
   const handleAddTeamMember = async (e: React.FormEvent) => {
     e.preventDefault();
     setTeamError('');
@@ -126,7 +126,7 @@ export default function HomePage() {
     }
   };
 
-  // 2. BUSCA DE LEADS
+  // 2. BUSCA DE LEADS E ESCUTA EM TEMPO REAL GLOBAL (LEADS & SIDEBAR RE-ORDER)
   useEffect(() => {
     if (loadingAuth) return;
 
@@ -142,37 +142,115 @@ export default function HomePage() {
     };
     fetchLeads();
 
-    const leadsChannel = supabase.channel('leads-channel').on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_leads' }, (payload: any) => {
-      const newLead = payload.new as any;
-      if (!newLead || !newLead.id) return;
-      setLeads((curr: any[]) => curr.find(l => l.id === newLead.id) ? curr.map(l => l.id === newLead.id ? newLead : l) : [...curr, newLead]);
-      setSelectedLead((prev: any) => prev?.id === newLead.id ? newLead : prev);
-    }).subscribe();
+    // Escuta alterações na tabela dentup_leads
+    const leadsChannel = supabase
+      .channel('leads-global-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_leads' }, (payload: any) => {
+        const newLead = payload.new as any;
+        if (!newLead || !newLead.id) return;
+        setLeads((curr: any[]) =>
+          curr.find((l) => l.id === newLead.id)
+            ? curr.map((l) => (l.id === newLead.id ? newLead : l))
+            : [...curr, newLead]
+        );
+        setSelectedLead((prev: any) => (prev?.id === newLead.id ? newLead : prev));
+      })
+      .subscribe();
 
-    return () => { supabase.removeChannel(leadsChannel); };
+    // Escuta TODAS as mensagens recebidas para subir o lead correspondente no topo do sidebar na hora
+    const globalMessagesChannel = supabase
+      .channel('global-messages-sidebar-channel')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
+        const newMsg = payload.new;
+        if (!newMsg || !newMsg.session_id) return;
+
+        const cleanPhoneFromSession = newMsg.session_id.replace('dentup_', '');
+
+        setLeads((currLeads) => {
+          return currLeads.map((lead) => {
+            const leadPhone = (lead.phone || lead.phone_number || '').replace(/\D/g, '');
+            if (leadPhone === cleanPhoneFromSession) {
+              return {
+                ...lead,
+                ultima_interacao: newMsg.created_at || new Date().toISOString(),
+                'última_interação': newMsg.created_at || new Date().toISOString()
+              };
+            }
+            return lead;
+          });
+        });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(leadsChannel);
+      supabase.removeChannel(globalMessagesChannel);
+    };
   }, [loadingAuth]);
 
-  // 3. BUSCA DE MENSAGENS
+  // 3. BUSCA E ESCUTA DE MENSAGENS EM TEMPO REAL (MENSAGENS DO CHAT SELECIONADO)
   useEffect(() => {
-    if (selectedLead && !loadingAuth) {
-      const cleanPhone = (selectedLead.phone || selectedLead.phone_number || '').replace(/\D/g, '');
-      const targetSessionId = `dentup_${cleanPhone}`;
-      
-      const fetchMessages = async () => {
-        if (!cleanPhone) { setMessages([]); return; }
-        const { data, error } = await supabase.from('dentup_messages').select('*').eq('session_id', targetSessionId).order('created_at', { ascending: true });
-        if (!error) setMessages(data || []);
-      };
-      fetchMessages();
+    if (!selectedLead || loadingAuth) return;
 
-      const messagesChannel = supabase.channel('messages-channel').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
-        const newMsg = payload.new as any;
-        if (newMsg && newMsg.session_id === targetSessionId) setMessages((prev: any[]) => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg]);
-      }).subscribe();
-
-      return () => { supabase.removeChannel(messagesChannel); };
+    const cleanPhone = (selectedLead.phone || selectedLead.phone_number || '').replace(/\D/g, '');
+    if (!cleanPhone) {
+      setMessages([]);
+      return;
     }
-  }, [selectedLead, loadingAuth]);
+
+    const targetSessionId = `dentup_${cleanPhone}`;
+
+    // Busca inicial de mensagens do paciente selecionado
+    const fetchMessages = async () => {
+      const { data, error } = await supabase
+        .from('dentup_messages')
+        .select('*')
+        .eq('session_id', targetSessionId)
+        .order('created_at', { ascending: true });
+
+      if (!error) setMessages(data || []);
+    };
+
+    fetchMessages();
+
+    // Inscrição em tempo real com filtro direto no Supabase para máxima velocidade
+    const channelName = `chat_messages_${cleanPhone}`;
+    const messagesChannel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'dentup_messages',
+          filter: `session_id=eq.${targetSessionId}`
+        },
+        (payload: any) => {
+          const newMsg = payload.new;
+          if (newMsg) {
+            setMessages((prev) => {
+              // Se a mensagem já existe pelo ID, ignora
+              if (prev.some((m) => m.id === newMsg.id)) return prev;
+
+              // Substitui mensagem temporária otimista enviada pelo humano
+              const tempIndex = prev.findIndex((m) => m.id.toString().startsWith('temp-'));
+              if (tempIndex !== -1) {
+                const updated = [...prev];
+                updated[tempIndex] = newMsg;
+                return updated;
+              }
+
+              return [...prev, newMsg];
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(messagesChannel);
+    };
+  }, [selectedLead?.id, selectedLead?.phone, selectedLead?.phone_number, loadingAuth]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -188,7 +266,7 @@ export default function HomePage() {
     const newStatus = !selectedLead.is_paused;
     const updatedLead = { ...selectedLead, is_paused: newStatus };
     setSelectedLead(updatedLead);
-    setLeads((prev: any[]) => prev.map(l => l.id === selectedLead.id ? updatedLead : l));
+    setLeads((prev: any[]) => prev.map((l) => (l.id === selectedLead.id ? updatedLead : l)));
     await supabase.from('dentup_leads').update({ is_paused: newStatus }).eq('id', selectedLead.id);
   };
 
@@ -198,7 +276,12 @@ export default function HomePage() {
     setNewMessage('');
     const cleanPhone = (selectedLead.phone || selectedLead.phone_number || '').replace(/\D/g, '');
     const targetSessionId = `dentup_${cleanPhone}`;
-    const optimisticMessage = { id: `temp-${Date.now()}`, session_id: targetSessionId, created_at: new Date().toISOString(), message: { type: 'human_agent', content: messageText } };
+    const optimisticMessage = {
+      id: `temp-${Date.now()}`,
+      session_id: targetSessionId,
+      created_at: new Date().toISOString(),
+      message: { type: 'human_agent', content: messageText }
+    };
 
     setMessages((prev: any[]) => [...prev, optimisticMessage]);
 
@@ -206,17 +289,29 @@ export default function HomePage() {
       if (!selectedLead.is_paused) {
         const leadPausado = { ...selectedLead, is_paused: true };
         setSelectedLead(leadPausado);
-        setLeads((prev: any[]) => prev.map(l => l.id === selectedLead.id ? leadPausado : l));
+        setLeads((prev: any[]) => prev.map((l) => (l.id === selectedLead.id ? leadPausado : l)));
         await supabase.from('dentup_leads').update({ is_paused: true }).eq('id', selectedLead.id);
       }
-      const { data: insertedMessage, error } = await supabase.from('dentup_messages').insert({ session_id: targetSessionId, message: { type: 'human_agent', content: messageText } }).select().single();
-      if (!error) setMessages((prev: any[]) => prev.map(msg => msg.id === optimisticMessage.id ? insertedMessage : msg));
-      
+      const { data: insertedMessage, error } = await supabase
+        .from('dentup_messages')
+        .insert({ session_id: targetSessionId, message: { type: 'human_agent', content: messageText } })
+        .select()
+        .single();
+
+      if (!error) {
+        setMessages((prev: any[]) =>
+          prev.map((msg) => (msg.id === optimisticMessage.id ? insertedMessage : msg))
+        );
+      }
+
       fetch('https://api.rodolfoxborin.com.br/webhook/crm-envio-humano', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone_number: cleanPhone, content: messageText, session_id: targetSessionId }),
-      }).catch(err => console.error(err));
-    } catch (error) { console.error(error); }
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone_number: cleanPhone, content: messageText, session_id: targetSessionId })
+      }).catch((err) => console.error(err));
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   if (loadingAuth) {
@@ -245,7 +340,7 @@ export default function HomePage() {
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans notranslate" translate="no">
       
-      {/* HEADER COMPACTO E SLIM (ALTURA FIXA h-16) */}
+      {/* HEADER COMPACTO */}
       <div className="bg-white border-b border-slate-200 px-6 h-16 shrink-0 flex items-center justify-between z-20 shadow-sm">
         <div className="flex items-center gap-4">
           <img src="/logo.png" alt="Dent'up Odonto" className="h-10 w-auto object-contain" />
@@ -256,7 +351,6 @@ export default function HomePage() {
         </div>
         
         <div className="flex items-center gap-4">
-          {/* BOTÃO GERENCIAR EQUIPE (EXIBE PARA ADMINS) */}
           {isAdmin && (
             <button
               onClick={() => setShowTeamModal(true)}
@@ -269,7 +363,6 @@ export default function HomePage() {
             </button>
           )}
 
-          {/* BOTÕES DE NAVEGAÇÃO */}
           <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
             <button onClick={() => setAbaAtiva('chat')} className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all notranslate ${abaAtiva === 'chat' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               Chat (Mensagens)
@@ -279,7 +372,6 @@ export default function HomePage() {
             </button>
           </div>
 
-          {/* PERFIL DO USUÁRIO LOGADO E BOTÃO SAIR */}
           <div className="flex items-center gap-3 border-l border-slate-200 pl-4">
             <div className="text-right hidden sm:block">
               <p className="text-xs font-bold text-slate-800 notranslate">{userProfile?.nome || 'Usuário'}</p>
@@ -473,7 +565,6 @@ export default function HomePage() {
 
             <div className="p-6 overflow-y-auto space-y-6 custom-scrollbar">
               
-              {/* FORMULÁRIO DE CADASTRO */}
               <form onSubmit={handleAddTeamMember} className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4">
                 <h3 className="text-sm font-bold text-slate-800 border-b border-slate-200 pb-2">Cadastrar Novo Colaborador</h3>
                 
@@ -521,7 +612,6 @@ export default function HomePage() {
                 </div>
               </form>
 
-              {/* LISTA DE COLABORADORES */}
               <div>
                 <h3 className="text-sm font-bold text-slate-800 mb-3">Membros da Equipe ({teamMembers.length})</h3>
                 <div className="border rounded-xl overflow-hidden border-slate-200">
