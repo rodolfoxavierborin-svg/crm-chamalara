@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from 'react';
-import { supabase } from '../../lib/supabase';
-import KanbanBoard from '../../components/KanbanBoard';
+import { supabase } from '../lib/supabase';
+import KanbanBoard from '../components/KanbanBoard';
 
 const formatarHorario = (dataIso: string | null) => {
   if (!dataIso) return '';
@@ -31,7 +31,7 @@ const isMensagemTecnica = (texto: string): boolean => {
   return false;
 };
 
-const ChatPage = () => {
+export default function HomePage() {
   const [abaAtiva, setAbaAtiva] = useState<'chat' | 'kanban'>('chat');
   const [leads, setLeads] = useState<any[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
@@ -55,7 +55,6 @@ const ChatPage = () => {
       const newLead = payload.new as any;
       if (!newLead || !newLead.id) return;
       
-      // Correção TypeScript: Tipagem explícita para curr e prev
       setLeads((curr: any[]) => curr.find(l => l.id === newLead.id) ? curr.map(l => l.id === newLead.id ? newLead : l) : [...curr, newLead]);
       setSelectedLead((prev: any) => prev?.id === newLead.id ? newLead : prev);
     }).subscribe();
@@ -74,7 +73,6 @@ const ChatPage = () => {
       fetchMessages();
       const messagesChannel = supabase.channel('messages-channel').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
         const newMsg = payload.new as any;
-        // Correção TypeScript: Tipagem explícita para prev
         if (newMsg && newMsg.session_id === targetSessionId) setMessages((prev: any[]) => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg]);
       }).subscribe();
       return () => { supabase.removeChannel(messagesChannel); };
@@ -90,7 +88,6 @@ const ChatPage = () => {
     const newStatus = !selectedLead.is_paused;
     const updatedLead = { ...selectedLead, is_paused: newStatus };
     setSelectedLead(updatedLead);
-    // Correção TypeScript: Tipagem explícita para prev
     setLeads((prev: any[]) => prev.map(l => l.id === selectedLead.id ? updatedLead : l));
     await supabase.from('dentup_leads').update({ is_paused: newStatus }).eq('id', selectedLead.id);
   };
@@ -102,20 +99,17 @@ const ChatPage = () => {
     const cleanPhone = (selectedLead.phone || selectedLead.phone_number || '').replace(/\D/g, '');
     const targetSessionId = `dentup_${cleanPhone}`;
     const optimisticMessage = { id: `temp-${Date.now()}`, session_id: targetSessionId, created_at: new Date().toISOString(), message: { type: 'human_agent', content: messageText } };
-    
-    // Correção TypeScript: Tipagem explícita para prev
+
     setMessages((prev: any[]) => [...prev, optimisticMessage]);
 
     try {
       if (!selectedLead.is_paused) {
         const leadPausado = { ...selectedLead, is_paused: true };
         setSelectedLead(leadPausado);
-        // Correção TypeScript: Tipagem explícita para prev
         setLeads((prev: any[]) => prev.map(l => l.id === selectedLead.id ? leadPausado : l));
         await supabase.from('dentup_leads').update({ is_paused: true }).eq('id', selectedLead.id);
       }
       const { data: insertedMessage, error } = await supabase.from('dentup_messages').insert({ session_id: targetSessionId, message: { type: 'human_agent', content: messageText } }).select().single();
-      // Correção TypeScript: Tipagem explícita para prev
       if (!error) setMessages((prev: any[]) => prev.map(msg => msg.id === optimisticMessage.id ? insertedMessage : msg));
       
       fetch('https://api.rodolfoxborin.com.br/webhook/crm-envio-humano', {
@@ -156,7 +150,7 @@ const ChatPage = () => {
         ) : (
           <div className="flex h-full w-full bg-white border-x border-slate-200">
             
-            {/* SIDEBAR DE CONVERSAS (Estilo WhatsApp) */}
+            {/* SIDEBAR DE CONVERSAS */}
             <div className={`w-full md:w-[380px] border-r border-slate-200 bg-white flex flex-col ${selectedLead ? 'hidden md:flex' : 'flex'}`}>
               <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center h-[70px]">
                 <h2 className="text-lg font-bold text-slate-800">Mensagens</h2>
@@ -174,7 +168,6 @@ const ChatPage = () => {
                         isSelected ? 'bg-blue-50/80' : 'hover:bg-slate-50'
                       }`}
                     >
-                      {/* FOTO DE PERFIL / FALLBACK INICIAL */}
                       {photo ? (
                         <img src={photo} alt={lead.name || 'Paciente'} className="w-12 h-12 rounded-full object-cover shrink-0 shadow-sm" />
                       ) : (
@@ -199,13 +192,12 @@ const ChatPage = () => {
               </ul>
             </div>
 
-            {/* ÁREA DO CHAT (WhatsApp Clean em #D9FDD3) */}
+            {/* ÁREA DO CHAT */}
             <div className={`flex-1 flex-col bg-[#EFEAE2] relative ${selectedLead ? 'flex' : 'hidden md:flex'}`}>
               <div className="absolute inset-0 opacity-40 pointer-events-none" style={{ backgroundImage: 'url("https://www.transparenttextures.com/patterns/cubes.png")' }}></div>
 
               {selectedLead ? (
                 <>
-                  {/* HEADER DO CHAT */}
                   <div className="bg-slate-50 border-b border-slate-200 p-4 h-[70px] flex justify-between items-center z-10">
                     <div className="flex items-center gap-3.5">
                       <button onClick={() => setSelectedLead(null)} className="md:hidden text-slate-500">
@@ -236,7 +228,6 @@ const ChatPage = () => {
                     </button>
                   </div>
 
-                  {/* BALÕES DE MENSAGENS */}
                   <div className="flex-1 overflow-y-auto p-6 space-y-4 relative z-10 custom-scrollbar">
                     {messages.map((msg) => {
                       const msgType = msg.message?.type || msg.type;
@@ -258,7 +249,7 @@ const ChatPage = () => {
                                 <div className={`max-w-[85%] md:max-w-lg rounded-2xl p-4 shadow-sm relative ${
                                     isPatient 
                                       ? 'bg-white text-slate-800 rounded-tl-none border border-slate-100/80' 
-                                      : 'bg-[#D9FDD3] text-slate-800 rounded-tr-none' // Verde WhatsApp Web Original
+                                      : 'bg-[#D9FDD3] text-slate-800 rounded-tr-none'
                                   }`}
                                 >
                                   <span className={`block text-xs font-bold mb-1.5 ${
@@ -282,7 +273,6 @@ const ChatPage = () => {
                     <div ref={messagesEndRef} />
                   </div>
 
-                  {/* INPUT BAR WHATSAPP */}
                   <div className="p-4 bg-slate-50 h-[80px] flex items-center z-10 border-t border-slate-200">
                     <div className="flex items-center space-x-3 w-full max-w-5xl mx-auto">
                       <div className="flex-1 bg-white rounded-full p-2 flex items-center shadow-sm border border-slate-300 focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500 transition-all">
@@ -322,6 +312,4 @@ const ChatPage = () => {
       `}} />
     </div>
   );
-};
-
-export default ChatPage;
+}
