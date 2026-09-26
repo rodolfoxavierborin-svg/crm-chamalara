@@ -144,7 +144,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     await supabase.from('dentup_leads').update({ [campo]: valor }).eq('id', leadDrawer.id);
   };
 
-  // FUNÇÃO PARA CRIAR UM NOVO PACIENTE MANUALMENTE (COLUNAS CORRIGIDAS)
   const handleCreatePatient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPatientForm.name || !newPatientForm.phone) {
@@ -360,12 +359,11 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
         </div>
 
         {/* Filtros + Botão de Novo Paciente */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 flex-wrap">
           
-          {/* BOTÃO + NOVO PACIENTE (ÍCONE SVG BRANCO PURO) */}
           <button
             onClick={() => setIsNewPatientModalOpen(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-sm transition-all shadow-md flex items-center gap-1.5"
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-sm transition-all shadow-md flex items-center gap-1.5 shrink-0"
           >
             <svg className="w-4 h-4 text-white shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.8">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -377,14 +375,18 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
             disabled={!isAdmin && userUnidade !== 'Todas' && userUnidade !== 'all'}
             value={targetUnidade}
             onChange={(e) => setUnidadeFilter(e.target.value)}
-            className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm text-slate-700 outline-none cursor-pointer focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed font-semibold"
+            className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 outline-none cursor-pointer focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed font-semibold"
           >
             <option value="all">Todas as Unidades</option>
             {LISTA_UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
             <option value="Pendente">Pendente</option>
           </select>
 
-          <select value={dateRange} onChange={(e) => setDateRange(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm text-slate-700 outline-none cursor-pointer focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+          <select 
+            value={dateRange} 
+            onChange={(e) => setDateRange(e.target.value)} 
+            className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 outline-none cursor-pointer focus:border-blue-500 focus:ring-2 focus:ring-blue-100 font-medium"
+          >
             <option value="all">Todo o Período</option>
             <option value="today">Hoje</option>
             <option value="yesterday">Ontem</option>
@@ -393,8 +395,27 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
             <option value="custom">Personalizado</option>
           </select>
 
+          {/* SELEÇÃO DE DATA PERSONALIZADA (TIPO GOOGLE ADS) */}
+          {dateRange === 'custom' && (
+            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg border border-slate-300 animate-in fade-in zoom-in-95 duration-150">
+              <input
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="bg-white border border-slate-300 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 cursor-pointer font-medium"
+              />
+              <span className="text-xs text-slate-400 font-bold">até</span>
+              <input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="bg-white border border-slate-300 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 cursor-pointer font-medium"
+              />
+            </div>
+          )}
+
           <div className="relative">
-            <input type="text" placeholder="Buscar paciente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-white border border-slate-300 rounded-lg pl-10 pr-4 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 w-52 shadow-sm" />
+            <input type="text" placeholder="Buscar paciente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-white border border-slate-300 rounded-lg pl-10 pr-4 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 w-48 shadow-sm" />
             <svg className="w-5 h-5 text-slate-400 absolute left-3 top-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
           </div>
         </div>
@@ -447,7 +468,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                                       </div>
                                       <p className="text-sm text-slate-500 mb-2">{lead.phone || lead.phone_number}</p>
                                       
-                                      {/* TAG DO PROMOTOR (SE EXISTIR) */}
                                       {lead.promotor && (
                                         <p className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded w-fit mb-3">
                                           👤 Origem: {lead.promotor}
