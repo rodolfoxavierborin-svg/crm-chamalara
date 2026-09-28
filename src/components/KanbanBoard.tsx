@@ -16,6 +16,26 @@ const COLUNAS = [
 
 const LISTA_UNIDADES = ['Santo André', 'Diadema', 'Mauá', 'São Mateus'];
 
+// MAPEAMENTO DOS IDS E CORES OFICIAIS DAS AGENDAS DO GOOGLE
+const GOOGLE_CALENDARS: Record<string, { id: string; color: string }> = {
+  'Santo André': { 
+    id: 'e53816e5210cbd29f4e2d525f75e9fdbad0333c901a13d213e98d791e99b23b0%40group.calendar.google.com', 
+    color: '%23D50000' // Vermelho
+  },
+  'Diadema': { 
+    id: '205188e12762a447906c539183a8be8e191162831ea3526fced0b3d7a9bf31ff%40group.calendar.google.com', 
+    color: '%23F6BF26' // Amarelo
+  },
+  'Mauá': { 
+    id: '6d64444a84645cd3a6871595cc4f6b1929cdd13d175ef676b5c89f3e4ee265b5%40group.calendar.google.com', 
+    color: '%230B8043' // Verde
+  },
+  'São Mateus': { 
+    id: '84903b0600945eccd716d5c0b51a620758e8ea1c6dc7a8bfa75a0b498febfbec%40group.calendar.google.com', 
+    color: '%238E24AA' // Roxo
+  },
+};
+
 const OPCOES_PROCEDIMENTO_PADRAO = [
   'Não Informado',
   'Avaliação para prótese dentária',
@@ -88,7 +108,9 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [unidadeFilter, setUnidadeFilter] = useState('all');
-  const [activeTab, setActiveTab] = useState<'kanban' | 'analytics'>('kanban');
+  
+  // NAVEGAÇÃO ENTRE ABAS
+  const [activeTab, setActiveTab] = useState<'kanban' | 'analytics' | 'calendar'>('kanban');
 
   // ESTADO DO MODAL "+ NOVO PACIENTE"
   const [isNewPatientModalOpen, setIsNewPatientModalOpen] = useState(false);
@@ -202,11 +224,26 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
   const totalLeads = leadsNaUnidade.length;
   const agendados = leadsNaUnidade.filter(l => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'no_show'].includes(l.status)).length;
-  const confirmados = leadsNaUnidade.filter(l => l.status === 'confirmado').length;
-  const naClinica = leadsNaUnidade.filter(l => l.status === 'na_clinica').length;
   const vendidos = leadsNaUnidade.filter(l => l.status === 'vendido').length;
   const taxaConversao = totalLeads > 0 ? ((agendados / totalLeads) * 100).toFixed(1) : '0.0';
   const totalEstagnados = leadsNaUnidade.filter(l => getHorasParado(l) >= 24 && l.status !== 'vendido' && l.status !== 'encerrado').length;
+
+  // GERADOR DINÂMICO DE URL DO GOOGLE CALENDAR
+  const getGoogleCalendarUrl = () => {
+    const baseUrl = "https://calendar.google.com/calendar/embed?ctz=America%2FSao_Paulo&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=1&showTz=0&mode=WEEK";
+    
+    if (targetUnidade !== 'all' && targetUnidade !== 'Todas' && GOOGLE_CALENDARS[targetUnidade]) {
+      const cal = GOOGLE_CALENDARS[targetUnidade];
+      return `${baseUrl}&src=${cal.id}&color=${cal.color}`;
+    }
+
+    // Se for "Todas as Unidades", carrega as 4 sobrepostas com cores separadas
+    const allSources = Object.values(GOOGLE_CALENDARS)
+      .map(cal => `&src=${cal.id}&color=${cal.color}`)
+      .join('');
+
+    return `${baseUrl}${allSources}`;
+  };
 
   if (!isBrowser) return null;
 
@@ -308,6 +345,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       <div className="bg-white border-b border-slate-200 px-8 py-5 flex flex-wrap items-center justify-between z-10 sticky top-0 shadow-sm gap-6">
         
         <div className="flex items-center gap-8">
+          {/* SELETOR DE ABAS PRINCIPAIS */}
           <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
             <button 
               onClick={() => setActiveTab('kanban')} 
@@ -320,6 +358,12 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
               className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'analytics' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
             >
               📊 Analytics
+            </button>
+            <button 
+              onClick={() => setActiveTab('calendar')} 
+              className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'calendar' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+            >
+              📅 Agenda
             </button>
           </div>
 
@@ -360,7 +404,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
         {/* Filtros + Botão de Novo Paciente */}
         <div className="flex items-center gap-3 flex-wrap">
-          
           <button
             onClick={() => setIsNewPatientModalOpen(true)}
             className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-sm transition-all shadow-md flex items-center gap-1.5 shrink-0"
@@ -382,49 +425,52 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
             <option value="Pendente">Pendente</option>
           </select>
 
-          <select 
-            value={dateRange} 
-            onChange={(e) => setDateRange(e.target.value)} 
-            className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 outline-none cursor-pointer focus:border-blue-500 focus:ring-2 focus:ring-blue-100 font-medium"
-          >
-            <option value="all">Todo o Período</option>
-            <option value="today">Hoje</option>
-            <option value="yesterday">Ontem</option>
-            <option value="last_7">Últimos 7 dias</option>
-            <option value="this_month">Este Mês</option>
-            <option value="custom">Personalizado</option>
-          </select>
+          {activeTab !== 'calendar' && (
+            <>
+              <select 
+                value={dateRange} 
+                onChange={(e) => setDateRange(e.target.value)} 
+                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 outline-none cursor-pointer focus:border-blue-500 focus:ring-2 focus:ring-blue-100 font-medium"
+              >
+                <option value="all">Todo o Período</option>
+                <option value="today">Hoje</option>
+                <option value="yesterday">Ontem</option>
+                <option value="last_7">Últimos 7 dias</option>
+                <option value="this_month">Este Mês</option>
+                <option value="custom">Personalizado</option>
+              </select>
 
-          {/* SELEÇÃO DE DATA PERSONALIZADA (TIPO GOOGLE ADS) */}
-          {dateRange === 'custom' && (
-            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg border border-slate-300 animate-in fade-in zoom-in-95 duration-150">
-              <input
-                type="date"
-                value={customStart}
-                onChange={(e) => setCustomStart(e.target.value)}
-                className="bg-white border border-slate-300 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 cursor-pointer font-medium"
-              />
-              <span className="text-xs text-slate-400 font-bold">até</span>
-              <input
-                type="date"
-                value={customEnd}
-                onChange={(e) => setCustomEnd(e.target.value)}
-                className="bg-white border border-slate-300 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 cursor-pointer font-medium"
-              />
-            </div>
+              {dateRange === 'custom' && (
+                <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg border border-slate-300 animate-in fade-in zoom-in-95 duration-150">
+                  <input
+                    type="date"
+                    value={customStart}
+                    onChange={(e) => setCustomStart(e.target.value)}
+                    className="bg-white border border-slate-300 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 cursor-pointer font-medium"
+                  />
+                  <span className="text-xs text-slate-400 font-bold">até</span>
+                  <input
+                    type="date"
+                    value={customEnd}
+                    onChange={(e) => setCustomEnd(e.target.value)}
+                    className="bg-white border border-slate-300 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 cursor-pointer font-medium"
+                  />
+                </div>
+              )}
+
+              <div className="relative">
+                <input type="text" placeholder="Buscar paciente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-white border border-slate-300 rounded-lg pl-10 pr-4 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 w-48 shadow-sm" />
+                <svg className="w-5 h-5 text-slate-400 absolute left-3 top-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+              </div>
+            </>
           )}
-
-          <div className="relative">
-            <input type="text" placeholder="Buscar paciente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-white border border-slate-300 rounded-lg pl-10 pr-4 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 w-48 shadow-sm" />
-            <svg className="w-5 h-5 text-slate-400 absolute left-3 top-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-          </div>
         </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden relative">
         
         {/* VIEW 1: QUADRO KANBAN */}
-        {activeTab === 'kanban' ? (
+        {activeTab === 'kanban' && (
           <div className="flex-1 overflow-x-auto p-6 custom-scrollbar">
             <DragDropContext onDragEnd={handleDragEnd}>
               <div className="flex gap-6 h-full items-start">
@@ -499,9 +545,10 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
               </div>
             </DragDropContext>
           </div>
-        ) : (
-          
-          /* VIEW 2: DASHBOARD DE ANALYTICS */
+        )}
+
+        {/* VIEW 2: DASHBOARD DE ANALYTICS */}
+        {activeTab === 'analytics' && (
           <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-[#F4F6F8]">
             <div className="max-w-7xl mx-auto space-y-8">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -643,6 +690,63 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                     })}
                   </div>
                 </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* VIEW 3: ABA DE CALENDÁRIO VISUAL (OTIMIZADA) */}
+        {activeTab === 'calendar' && (
+          <div className="flex-1 p-6 bg-[#F4F6F8] flex flex-col h-[calc(100vh-140px)] w-full">
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden">
+              
+              {/* CABEÇALHO DA AGENDA */}
+              <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap justify-between items-center bg-slate-50 gap-4 shrink-0">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">📅</span>
+                  <div>
+                    <h3 className="font-bold text-slate-800 text-base">
+                      Agenda de Consultas Odontológicas
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Exibindo agenda da unidade: <strong className="text-blue-600">{targetUnidade === 'all' ? 'Todas as Unidades' : targetUnidade}</strong>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-6 flex-wrap">
+                  {/* LEGENDA DE CORES */}
+                  <div className="flex items-center gap-4 text-xs font-semibold">
+                    <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#D50000]"></span> Santo André</span>
+                    <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#F6BF26]"></span> Diadema</span>
+                    <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#0B8043]"></span> Mauá</span>
+                    <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#8E24AA]"></span> São Mateus</span>
+                  </div>
+
+                  {/* BOTÃO DE EXPANSÃO */}
+                  <a
+                    href={getGoogleCalendarUrl()}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-1.5 rounded-lg text-xs transition-all border border-slate-200 flex items-center gap-1.5 shadow-sm"
+                    title="Abrir em nova aba no Google Agenda"
+                  >
+                    <span>↗️ Expandir no Google</span>
+                  </a>
+                </div>
+              </div>
+
+              {/* CONTAINER DO IFRAME TELA CHEIA */}
+              <div className="flex-1 w-full h-full relative min-h-[500px]">
+                <iframe
+                  src={getGoogleCalendarUrl()}
+                  style={{ border: 0 }}
+                  className="w-full h-full absolute inset-0"
+                  frameBorder="0"
+                  scrolling="no"
+                  title="Agenda Google Dentup"
+                ></iframe>
               </div>
 
             </div>
