@@ -20,10 +20,36 @@ const getUltimaInteracao = (lead: any) => {
   return rawDate ? new Date(rawDate).getTime() : 0;
 };
 
-const isMensagemTecnica = (texto: string): boolean => {
-  if (!texto || typeof texto !== 'string') return true;
-  const t = texto.trim();
-  if (t.startsWith('[{') || t.startsWith('{"')) return true;
+// HELPER PARA EXTRAIR E PARSEAR MENSAGENS COM SEGURANÇA
+const parseMensagem = (msg: any) => {
+  let raw = msg.message || msg;
+  let type = 'human';
+  let content = '';
+
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw);
+    } catch (e) {
+      content = raw;
+    }
+  }
+
+  if (typeof raw === 'object' && raw !== null) {
+    type = raw.type || msg.type || 'human';
+    content = raw.content || raw.data?.content || '';
+    if (typeof content === 'object') {
+      try { content = JSON.stringify(content); } catch (e) { content = ''; }
+    }
+  }
+
+  return { type, content, isTool: type === 'tool' };
+};
+
+const isMensagemTecnica = (msg: any): boolean => {
+  const { content, isTool } = parseMensagem(msg);
+  if (isTool) return true;
+  if (!content || typeof content !== 'string') return false;
+  const t = content.trim();
   if (t.startsWith('Calling ') || t.includes('with input:')) return true;
   if (t.includes('Confirmar_Agendamento') || t.includes('Create_an_event') || t.includes('Call_Sub-workflow')) return true;
   return false;
@@ -47,7 +73,7 @@ export default function HomePage() {
   const [newMemberNome, setNewMemberNome] = useState('');
   const [newMemberEmail, setNewMemberEmail] = useState('');
   const [newMemberPass, setNewMemberPass] = useState('');
-  const [newMemberCargo, setNewMemberCargo] = useState('atendente');
+  const [newMemberCargo, setNewMemberCargo] = useState('Atendente');
   const [newMemberUnidade, setNewMemberUnidade] = useState('Todas');
   const [savingMember, setSavingMember] = useState(false);
   const [teamError, setTeamError] = useState('');
@@ -69,7 +95,7 @@ export default function HomePage() {
         .eq('id', session.user.id)
         .single();
 
-      setUserProfile(profile || { nome: session.user.email, cargo: 'admin', unidade: 'Todas' });
+      setUserProfile(profile || { nome: session.user.email, cargo: 'Administrador Geral', unidade: 'Todas' });
       setLoadingAuth(false);
     };
 
@@ -96,9 +122,14 @@ export default function HomePage() {
     setSavingMember(true);
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+
       const res = await fetch('/api/admin/create-user', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token || ''}`
+        },
         body: JSON.stringify({
           nome: newMemberNome,
           email: newMemberEmail,
@@ -158,7 +189,7 @@ export default function HomePage() {
 
     const globalMessagesChannel = supabase
       .channel('global-messages-sidebar-channel')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
         const newMsg = payload.new;
         if (!newMsg || !newMsg.session_id) return;
 
@@ -186,7 +217,7 @@ export default function HomePage() {
     };
   }, [loadingAuth]);
 
-  // 3. BUSCA E ESCUTA DE MENSAGENS EM TEMPO REAL
+  // 3. BUSCA E ESCUTA DE MENSAGENS EM TEMPO REAL (SEM FILTRO QUEBRADO DE STRING)
   useEffect(() => {
     if (!selectedLead || loadingAuth) return;
 
@@ -210,20 +241,14 @@ export default function HomePage() {
 
     fetchMessages();
 
-    const channelName = `chat_messages_${cleanPhone}`;
     const messagesChannel = supabase
-      .channel(channelName)
+      .channel(`chat_messages_realtime_${cleanPhone}`)
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'dentup_messages',
-          filter: `session_id=eq.${targetSessionId}`
-        },
+        { event: 'INSERT', schema: 'public', table: 'dentup_messages' },
         (payload: any) => {
           const newMsg = payload.new;
-          if (newMsg) {
+          if (newMsg && newMsg.session_id === targetSessionId) {
             setMessages((prev) => {
               if (prev.some((m) => m.id === newMsg.id)) return prev;
 
@@ -319,7 +344,8 @@ export default function HomePage() {
     );
   }
 
-  const isAdmin = userProfile?.cargo?.toLowerCase() === 'admin' || userProfile?.cargo?.toLowerCase() === 'administrador';
+  const cargoNorm = userProfile?.cargo?.toLowerCase()?.trim() || '';
+  const isAdmin = cargoNorm === 'admin' || cargoNorm === 'administrador' || cargoNorm === 'administrador geral';
   const userUnidade = userProfile?.unidade || 'Todas';
 
   const sortedLeads = [...leads]
@@ -333,7 +359,7 @@ export default function HomePage() {
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans notranslate" translate="no">
       
-      {/* HEADER ULTRA LIMPO NO MOBILE E COMPLETO NO DESKTOP */}
+      {/* HEADER */}
       <div className="bg-white border-b border-slate-200 px-4 md:px-6 h-14 md:h-16 shrink-0 flex items-center justify-between z-20 shadow-sm">
         <div className="flex items-center gap-3">
           <img src="/logo.png" alt="Dent'up Odonto" className="h-8 md:h-10 w-auto object-contain" />
@@ -344,8 +370,6 @@ export default function HomePage() {
         </div>
         
         <div className="flex items-center gap-3 md:gap-4">
-          
-          {/* BOTÃO GERENCIAR EQUIPE (ESCONDIDO NO MOBILE -> VISÍVEL SÓ NO DESKTOP `hidden md:flex`) */}
           {isAdmin && (
             <button
               onClick={() => setShowTeamModal(true)}
@@ -358,7 +382,6 @@ export default function HomePage() {
             </button>
           )}
 
-          {/* BOTÕES DE NAVEGAÇÃO CHAT / KANBAN (ESCONDIDOS NO MOBILE -> VISÍVEIS SÓ NO DESKTOP `hidden md:flex`) */}
           <div className="hidden md:flex bg-slate-100 p-1 rounded-lg border border-slate-200">
             <button onClick={() => setAbaAtiva('chat')} className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all notranslate ${abaAtiva === 'chat' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               Chat (Mensagens)
@@ -368,12 +391,11 @@ export default function HomePage() {
             </button>
           </div>
 
-          {/* PERFIL E BOTÃO SAIR */}
           <div className="flex items-center gap-2 md:gap-3 border-l border-slate-200 pl-3 md:pl-4">
             <div className="text-right">
               <p className="text-xs font-bold text-slate-800 notranslate">{userProfile?.nome || 'Usuário'}</p>
               <div className="flex items-center justify-end gap-1">
-                <span className="text-[9px] md:text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate">{userProfile?.cargo || 'atendente'}</span>
+                <span className="text-[9px] md:text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate">{userProfile?.cargo || 'Atendente'}</span>
                 {userUnidade !== 'Todas' && (
                   <span className="text-[9px] md:text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate">{userUnidade}</span>
                 )}
@@ -477,18 +499,17 @@ export default function HomePage() {
 
                   <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-3 relative z-10 custom-scrollbar">
                     {messages.map((msg) => {
-                      const msgType = msg.message?.type || msg.type;
-                      const rawContent = msg.message?.content || msg.message?.data?.content || msg.content;
-                      if (isMensagemTecnica(rawContent)) return null;
+                      if (isMensagemTecnica(msg)) return null;
+                      const { type, content } = parseMensagem(msg);
 
-                      const isPatient = msgType === 'human' || msgType === 'user';
-                      const isAI = msgType === 'ai' || msgType === 'assistant';
-                      const baloes = rawContent.split('###').map((t: string) => t.trim()).filter((t: string) => t.length > 0);
+                      const isPatient = type === 'human' || type === 'user';
+                      const isAI = type === 'ai' || type === 'assistant';
+                      
+                      const baloes = (content || '').split('###').map((t: string) => t.trim()).filter((t: string) => t.length > 0);
 
                       return (
                         <React.Fragment key={msg.id}>
                           {baloes.map((texto: string, index: number) => {
-                            if (isMensagemTecnica(texto)) return null;
                             return (
                               <div key={`${msg.id}-${index}`} className={`flex ${isPatient ? 'justify-start' : 'justify-end'}`}>
                                 <div className={`max-w-[85%] md:max-w-md rounded-2xl p-3 shadow-sm relative ${
@@ -583,11 +604,13 @@ export default function HomePage() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-600 mb-1">Cargo / Função</label>
-                    <select className="w-full px-3 py-2 text-xs border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white" value={newMemberCargo} onChange={e => setNewMemberCargo(e.target.value)}>
-                      <option value="atendente">Atendente / Recepcionista</option>
-                      <option value="gerente">Gerente de Unidade</option>
-                      <option value="admin">Administrador Geral</option>
-                      <option value="promotor">Promotor / Divulgador</option>
+                    <select className="w-full px-3 py-2 text-xs border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white font-medium text-slate-800 cursor-pointer" value={newMemberCargo} onChange={e => setNewMemberCargo(e.target.value)}>
+                      <option value="Atendente">Atendente</option>
+                      <option value="Recepcionista">Recepcionista</option>
+                      <option value="Gerente de Unidade">Gerente de Unidade</option>
+                      <option value="Administrador Geral">Administrador Geral</option>
+                      <option value="Divulgador">Divulgador</option>
+                      <option value="Promotor">Promotor</option>
                     </select>
                   </div>
                 </div>
@@ -629,8 +652,10 @@ export default function HomePage() {
                           </td>
                           <td className="p-3">
                             <span className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${
-                              m.cargo?.toLowerCase() === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
-                            }`}>{m.cargo || 'atendente'}</span>
+                              ['admin', 'administrador', 'administrador geral'].includes(m.cargo?.toLowerCase()?.trim()) 
+                                ? 'bg-purple-100 text-purple-700' 
+                                : 'bg-blue-100 text-blue-700'
+                            }`}>{m.cargo || 'Atendente'}</span>
                           </td>
                           <td className="p-3 text-slate-600 font-medium">{m.unidade || 'Todas'}</td>
                         </tr>
