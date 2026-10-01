@@ -55,6 +55,35 @@ const formatarTempoParado = (horas: number): string => {
   return restHoras > 0 ? `${dias}d ${restHoras}h` : `${dias}d`;
 };
 
+// HELPER: FORMATAÇÃO LIMPA DA DATA DE AGENDAMENTO (Enterprise Standard)
+const formatarDataAgendamento = (dateStr?: string | null): string => {
+  if (!dateStr) return '';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '';
+    const dia = date.getDate().toString().padStart(2, '0');
+    const mes = (date.getMonth() + 1).toString().padStart(2, '0');
+    const horas = date.getHours().toString().padStart(2, '0');
+    const minutos = date.getMinutes().toString().padStart(2, '0');
+    return `${dia}/${mes} às ${horas}:${minutos}`;
+  } catch {
+    return '';
+  }
+};
+
+// HELPER: FORMATAÇÃO ENTERPRISE DE TELEFONE
+const formatarTelefone = (phone?: string | null): string => {
+  if (!phone) return 'Sem Telefone';
+  const clean = phone.replace(/\D/g, '');
+  if (clean.length === 13 && clean.startsWith('55')) {
+    return `(${clean.slice(2, 4)}) ${clean.slice(4, 9)}-${clean.slice(9)}`;
+  }
+  if (clean.length === 11) {
+    return `(${clean.slice(0, 2)}) ${clean.slice(2, 7)}-${clean.slice(7)}`;
+  }
+  return phone;
+};
+
 const isWithinDateRange = (dateStr: string | null, range: string, customStart?: string, customEnd?: string) => {
   if (range === 'all') return true;
   if (!dateStr) return false;
@@ -504,16 +533,29 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                                       }`}
                                       style={{ ...provided.draggableProps.style }}
                                     >
-                                      <div className="flex justify-between items-start mb-2 gap-2">
+                                      <div className="flex justify-between items-start mb-1.5 gap-2">
                                         <h4 className="font-semibold text-slate-900 text-base group-hover:text-blue-600 transition-colors line-clamp-1">{lead.name || 'Sem Nome'}</h4>
                                         {lead.is_paused && <span className="text-xs bg-slate-800 text-white px-2 py-1 rounded-md font-medium shrink-0 shadow-sm">Humano</span>}
                                       </div>
-                                      <p className="text-sm text-slate-500 mb-2">{lead.phone || lead.phone_number}</p>
+                                      
+                                      <p className="text-xs font-medium text-slate-500 mb-2">
+                                        {formatarTelefone(lead.phone || lead.phone_number)}
+                                      </p>
                                       
                                       {lead.promotor && (
-                                        <p className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded w-fit mb-3">
+                                        <p className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded w-fit mb-2">
                                           👤 Origem: {lead.promotor}
                                         </p>
+                                      )}
+
+                                      {/* BADGE DA DATA DE AGENDAMENTO - ENTERPRISE UI (LIMPO E SEM DUPLICIDADE) */}
+                                      {lead.data_agendamento && (
+                                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-700 bg-indigo-50/90 border border-indigo-100/80 px-2.5 py-1 rounded-lg mb-2.5 w-fit">
+                                          <svg className="w-3.5 h-3.5 text-indigo-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                          </svg>
+                                          <span>{formatarDataAgendamento(lead.data_agendamento)}</span>
+                                        </div>
                                       )}
 
                                       <div className="flex justify-between items-center pt-3 border-t border-slate-100">
@@ -872,7 +914,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-700 uppercase block mb-1">WhatsApp</label>
-                  <input type="text" readOnly value={leadDrawer.phone || leadDrawer.phone_number || ''} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm text-slate-500 outline-none cursor-not-allowed" />
+                  <input type="text" readOnly value={formatarTelefone(leadDrawer.phone || leadDrawer.phone_number)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm text-slate-500 outline-none cursor-not-allowed" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
