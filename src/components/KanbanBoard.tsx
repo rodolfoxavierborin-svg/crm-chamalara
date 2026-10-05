@@ -84,34 +84,66 @@ const formatarTelefone = (phone?: string | null): string => {
   return phone;
 };
 
+// 100% REFATORADO E REESCRITO: Motor de Precisão de Datas
 const isWithinDateRange = (dateStr: string | null, range: string, customStart?: string, customEnd?: string) => {
   if (range === 'all') return true;
   if (!dateStr) return false;
+  
   const leadDate = new Date(dateStr);
+  if (isNaN(leadDate.getTime())) return false;
+
+  const leadTime = leadDate.getTime();
   const now = new Date();
 
-  if (range === 'today') return leadDate.toDateString() === now.toDateString();
+  // Resetamos as horas para 00:00 e 23:59 rigorosamente no timezone local
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+
+  if (range === 'today') {
+    return leadTime >= todayStart && leadTime <= todayEnd;
+  }
+
   if (range === 'yesterday') {
-    const yesterday = new Date(); yesterday.setDate(now.getDate() - 1);
-    return leadDate.toDateString() === yesterday.toDateString();
+    const yStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0).getTime();
+    const yEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999).getTime();
+    return leadTime >= yStart && leadTime <= yEnd;
   }
+
   if (range === 'last_7') {
-    const sevenDaysAgo = new Date(); sevenDaysAgo.setDate(now.getDate() - 7);
-    return leadDate >= sevenDaysAgo;
+    // 7 dias trás estrito = Voltar 6 dias inteiros pra trás até o final de hoje
+    const sevenDaysAgoStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0, 0).getTime();
+    return leadTime >= sevenDaysAgoStart && leadTime <= todayEnd;
   }
+
   if (range === 'last_30') {
-    const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(now.getDate() - 30);
-    return leadDate >= thirtyDaysAgo;
+    const thirtyDaysAgoStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29, 0, 0, 0, 0).getTime();
+    return leadTime >= thirtyDaysAgoStart && leadTime <= todayEnd;
   }
-  if (range === 'this_month') return leadDate.getMonth() === now.getMonth() && leadDate.getFullYear() === now.getFullYear();
+
+  if (range === 'this_month') {
+    // Dia 1º do mês atual, 00:00:00 ATÉ último dia do mês atual às 23:59:59
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+    return leadTime >= monthStart && leadTime <= monthEnd;
+  }
+
   if (range === 'custom') {
-    if (!customStart && !customEnd) return true;
-    const leadTime = new Date(leadDate.getFullYear(), leadDate.getMonth(), leadDate.getDate()).getTime();
-    let startValid = true, endValid = true;
-    if (customStart) startValid = leadTime >= new Date(customStart + 'T00:00:00').getTime();
-    if (customEnd) endValid = leadTime <= new Date(customEnd + 'T23:59:59').getTime();
+    let startValid = true;
+    let endValid = true;
+    // Quebra a string "YYYY-MM-DD" e força o Javascript a interpretar no fuso local meia-noite
+    if (customStart) {
+      const [y, m, d] = customStart.split('-').map(Number);
+      const s = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+      startValid = leadTime >= s;
+    }
+    if (customEnd) {
+      const [y, m, d] = customEnd.split('-').map(Number);
+      const e = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+      endValid = leadTime <= e;
+    }
     return startValid && endValid;
   }
+
   return true;
 };
 
@@ -325,7 +357,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       <div className="bg-white border-b border-slate-200/80 z-10 sticky top-0 shadow-sm">
         
         {/* LINHA 1: NAVEGAÇÃO E AÇÕES */}
-        <div className="px-6 py-3 flex items-center justify-between border-b border-slate-100 gap-4">
+        <div className="px-6 py-3 flex items-center justify-between border-b border-slate-100 gap-4 flex-wrap">
           
           {/* ABAS PRINCIPAIS */}
           <div className="flex bg-slate-100/80 p-1 rounded-xl border border-slate-200/60">
@@ -359,7 +391,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
 
           {/* CONTROLES E BUSCA */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <button 
               onClick={() => setIsNewPatientModalOpen(true)} 
               className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all shadow-sm hover:shadow flex items-center gap-1.5"
@@ -379,7 +411,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
             </select>
 
             {activeTab !== 'calendar' && (
-              <>
+              <div className="flex items-center gap-2 flex-wrap">
                 <select 
                   value={dateRange} 
                   onChange={(e) => setDateRange(e.target.value)} 
@@ -393,6 +425,25 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <option value="custom">Personalizado</option>
                 </select>
 
+                {/* ADICIONADO: INPUTS DO FILTRO PERSONALIZADO QUE ESTAVAM FALTANDO! */}
+                {dateRange === 'custom' && (
+                  <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-lg border border-slate-200/80">
+                    <input 
+                      type="date" 
+                      value={customStart} 
+                      onChange={(e) => setCustomStart(e.target.value)} 
+                      className="bg-white border border-slate-200 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 cursor-pointer shadow-sm"
+                    />
+                    <span className="text-[11px] font-bold text-slate-400">até</span>
+                    <input 
+                      type="date" 
+                      value={customEnd} 
+                      onChange={(e) => setCustomEnd(e.target.value)} 
+                      className="bg-white border border-slate-200 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 cursor-pointer shadow-sm"
+                    />
+                  </div>
+                )}
+
                 <div className="relative">
                   <input 
                     type="text" 
@@ -403,7 +454,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   />
                   <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>
