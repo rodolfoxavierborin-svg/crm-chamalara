@@ -55,7 +55,6 @@ const formatarTempoParado = (horas: number): string => {
   return restHoras > 0 ? `${dias}d ${restHoras}h` : `${dias}d`;
 };
 
-// HELPER: FORMATAÇÃO LIMPA DA DATA DE AGENDAMENTO (Enterprise Standard)
 const formatarDataAgendamento = (dateStr?: string | null): string => {
   if (!dateStr) return '';
   try {
@@ -71,7 +70,6 @@ const formatarDataAgendamento = (dateStr?: string | null): string => {
   }
 };
 
-// HELPER: FORMATAÇÃO ENTERPRISE DE TELEFONE
 const formatarTelefone = (phone?: string | null): string => {
   if (!phone) return 'Sem Telefone';
   const clean = phone.replace(/\D/g, '');
@@ -82,6 +80,11 @@ const formatarTelefone = (phone?: string | null): string => {
     return `(${clean.slice(0, 2)}) ${clean.slice(2, 7)}-${clean.slice(7)}`;
   }
   return phone;
+};
+
+const formatarMoeda = (val?: number | string | null): string => {
+  const num = Number(val) || 0;
+  return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
 // Motor de Precisão de Datas
@@ -98,9 +101,7 @@ const isWithinDateRange = (dateStr: string | null, range: string, customStart?: 
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
   const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
 
-  if (range === 'today') {
-    return leadTime >= todayStart && leadTime <= todayEnd;
-  }
+  if (range === 'today') return leadTime >= todayStart && leadTime <= todayEnd;
 
   if (range === 'yesterday') {
     const yStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0).getTime();
@@ -119,15 +120,13 @@ const isWithinDateRange = (dateStr: string | null, range: string, customStart?: 
   }
 
   if (range === 'this_month') {
-    // Dia 1º do mês atual (00:00:00) até o último dia do mês atual (23:59:59)
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
     return leadTime >= monthStart && leadTime <= monthEnd;
   }
 
   if (range === 'custom') {
-    let startValid = true;
-    let endValid = true;
+    let startValid = true, endValid = true;
     if (customStart) {
       const [y, m, d] = customStart.split('-').map(Number);
       const s = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
@@ -149,10 +148,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const [isBrowser, setIsBrowser] = useState(false);
   const [leadDrawer, setLeadDrawer] = useState<any | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  
-  // AQUI FOI A ALTERAÇÃO: Inicializa o filtro carregando direto "Este Mês"!
   const [dateRange, setDateRange] = useState('this_month');
-  
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [unidadeFilter, setUnidadeFilter] = useState('all');
@@ -166,7 +162,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     unidade: 'Santo André',
     procedimento: 'Avaliação Geral',
     promotor: 'Passante de Rua',
-    notas_internas: ''
+    notas_internas: '',
+    valor_venda: ''
   });
 
   const cargoNormalized = userProfile?.cargo?.toLowerCase().trim() || '';
@@ -226,6 +223,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       procedimento: newPatientForm.procedimento,
       promotor: newPatientForm.promotor,
       notas_internas: newPatientForm.notas_internas,
+      valor_venda: newPatientForm.valor_venda ? Number(newPatientForm.valor_venda) : null,
       status: 'novo',
       is_paused: true,
       created_at: new Date().toISOString()
@@ -244,7 +242,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
         unidade: !isAdmin && userUnidade !== 'all' ? userUnidade : 'Santo André',
         procedimento: 'Avaliação Geral',
         promotor: 'Passante de Rua',
-        notas_internas: ''
+        notas_internas: '',
+        valor_venda: ''
       });
       fetchLeads();
     }
@@ -264,13 +263,17 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     return (lead.name || '').toLowerCase().includes(termo) || (lead.phone || lead.phone_number || '').toLowerCase().includes(termo);
   });
 
-  // METRICAS DE CONVERSAO CUMULATIVA
+  // METRICAS DE CONVERSAO CUMULATIVA E FINANCEIRAS
   const totalLeads = leadsNaUnidade.length;
   const totalEstagnados = leadsNaUnidade.filter(l => getHorasParado(l) >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(l.status)).length;
   const agendados = leadsNaUnidade.filter(l => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length;
   const confirmados = leadsNaUnidade.filter(l => ['confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length;
   const compareceram = leadsNaUnidade.filter(l => ['na_clinica', 'vendido', 'nao_vendido'].includes(l.status)).length;
   const vendidos = leadsNaUnidade.filter(l => l.status === 'vendido').length;
+
+  const faturamentoTotal = leadsNaUnidade
+    .filter(l => l.status === 'vendido')
+    .reduce((acc, l) => acc + (Number(l.valor_venda) || 0), 0);
 
   const taxaAgendamento = totalLeads > 0 ? ((agendados / totalLeads) * 100).toFixed(1) : '0.0';
   const taxaConfirmacao = agendados > 0 ? ((confirmados / agendados) * 100).toFixed(1) : '0.0';
@@ -359,7 +362,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
         {/* LINHA 1: NAVEGAÇÃO E AÇÕES */}
         <div className="px-6 py-3 flex items-center justify-between border-b border-slate-100 gap-4 flex-wrap">
           
-          {/* ABAS PRINCIPAIS */}
           <div className="flex bg-slate-100/80 p-1 rounded-xl border border-slate-200/60">
             <button 
               onClick={() => setActiveTab('kanban')} 
@@ -390,7 +392,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
             </button>
           </div>
 
-          {/* CONTROLES E BUSCA */}
           <div className="flex items-center gap-3 flex-wrap">
             <button 
               onClick={() => setIsNewPatientModalOpen(true)} 
@@ -458,10 +459,10 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         </div>
 
-        {/* LINHA 2: BANNER DE METRICAS DO FUNIL */}
+        {/* LINHA 2: BANNER DE METRICAS DO FUNIL COM DESTAQUE FINANCEIRO */}
         <div className="px-6 py-3 bg-slate-50/70 flex items-center justify-between gap-4 overflow-x-auto custom-scrollbar">
           
-          <div className="flex items-center gap-6 md:gap-10 shrink-0">
+          <div className="flex items-center gap-6 md:gap-8 shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-2.5 h-2.5 rounded-full bg-slate-400"></div>
               <div>
@@ -519,6 +520,15 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <span className="text-[10px] font-extrabold bg-teal-100 text-teal-700 px-1.5 py-0.2 rounded-full">{taxaFechamento}%</span>
                 </div>
                 <span className="text-xl md:text-2xl font-black text-teal-600 leading-tight">{vendidos}</span>
+              </div>
+            </div>
+
+            {/* CARD DE FATURAMENTO TOTAL EM R$ */}
+            <div className="flex items-center gap-3 pl-4 border-l border-slate-200">
+              <div className="w-3 h-3 rounded-full bg-emerald-600 animate-pulse"></div>
+              <div>
+                <span className="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Faturamento Total</span>
+                <span className="text-xl md:text-2xl font-black text-emerald-600 leading-tight">{formatarMoeda(faturamentoTotal)}</span>
               </div>
             </div>
           </div>
@@ -592,6 +602,13 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                                         </p>
                                       )}
 
+                                      {/* BADGE DE VALOR DE VENDA NO CARD DO KANBAN */}
+                                      {lead.valor_venda && Number(lead.valor_venda) > 0 && (
+                                        <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-md mb-2 w-fit">
+                                          💰 {formatarMoeda(lead.valor_venda)}
+                                        </div>
+                                      )}
+
                                       {lead.data_agendamento && (
                                         <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-700 bg-indigo-50/90 border border-indigo-100/80 px-2.5 py-1 rounded-lg mb-2.5 w-fit">
                                           <svg className="w-3.5 h-3.5 text-indigo-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -628,7 +645,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
-        {/* VIEW 2: DASHBOARD DE ANALYTICS */}
+        {/* VIEW 2: DASHBOARD DE ANALYTICS COM RESUMO FINANCEIRO */}
         {activeTab === 'analytics' && (
           <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scrollbar bg-[#F8FAFC]">
             <div className="max-w-7xl mx-auto space-y-10">
@@ -716,16 +733,16 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
                 <div className="mt-6 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-xl p-6 text-white flex flex-col sm:flex-row justify-between items-center gap-4 shadow-lg border border-slate-800">
                   <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-teal-500/20 border border-teal-500/30 flex items-center justify-center text-teal-400 shrink-0">
-                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+                    <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                     </div>
                     <div>
-                      <h4 className="text-sm font-bold text-slate-100 uppercase tracking-wider">Taxa de Conversão Global (End-to-End)</h4>
-                      <p className="text-xs text-slate-400 mt-0.5">Percentual exato de pacientes novos que viraram vendas no caixa da clínica.</p>
+                      <h4 className="text-sm font-bold text-slate-100 uppercase tracking-wider">Faturamento do Período</h4>
+                      <p className="text-xs text-slate-400 mt-0.5">Soma total das vendas de tratamentos fechados no período selecionado.</p>
                     </div>
                   </div>
-                  <div className="text-4xl font-black text-teal-400 bg-teal-950/60 border border-teal-500/30 px-5 py-2 rounded-xl shrink-0">
-                    {taxaConversaoGlobal}%
+                  <div className="text-3xl font-black text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-5 py-2 rounded-xl shrink-0">
+                    {formatarMoeda(faturamentoTotal)}
                   </div>
                 </div>
 
@@ -919,6 +936,11 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <textarea rows={3} placeholder="Ex: Paciente interessado em prótese rápida..." value={newPatientForm.notas_internas} onChange={(e) => setNewPatientForm({ ...newPatientForm, notas_internas: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white resize-none" />
                 </div>
 
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Valor Estimado/Venda (R$)</label>
+                  <input type="number" step="0.01" placeholder="Ex: 2500.00" value={newPatientForm.valor_venda} onChange={(e) => setNewPatientForm({ ...newPatientForm, valor_venda: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white" />
+                </div>
+
                 <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
                   <button type="button" onClick={() => setIsNewPatientModalOpen(false)} className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancelar</button>
                   <button type="submit" disabled={savingPatient} className="px-5 py-2 text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 rounded-lg shadow-sm transition-all disabled:opacity-50">{savingPatient ? 'Cadastrando...' : 'Salvar Paciente'}</button>
@@ -928,7 +950,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
-        {/* GAVETA LATERAL DO CLIENTE */}
+        {/* GAVETA LATERAL DO CLIENTE - VALOR DA VENDA POSICIONADO POR ÚLTIMO */}
         {leadDrawer && (
           <>
             <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm z-20" onClick={() => setLeadDrawer(null)} />
@@ -946,10 +968,12 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Nome Completo</label>
                   <input type="text" value={leadDrawer.name || ''} onChange={(e) => setLeadDrawer({...leadDrawer, name: e.target.value})} onBlur={(e) => handleUpdateLead('name', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" />
                 </div>
+                
                 <div>
                   <label className="text-xs font-bold text-slate-700 uppercase block mb-1">WhatsApp</label>
                   <input type="text" readOnly value={formatarTelefone(leadDrawer.phone || leadDrawer.phone_number)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm text-slate-500 outline-none cursor-not-allowed" />
                 </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Unidade</label>
@@ -976,9 +1000,29 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Promotor / Origem</label>
                   <input type="text" value={leadDrawer.promotor || ''} onChange={(e) => setLeadDrawer({...leadDrawer, promotor: e.target.value})} onBlur={(e) => handleUpdateLead('promotor', e.target.value)} placeholder="Ex: Passante de Rua..." className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" />
                 </div>
+
                 <div>
                   <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Anotações Internas</label>
                   <textarea rows={4} value={leadDrawer.notas_internas || ''} onChange={(e) => setLeadDrawer({...leadDrawer, notas_internas: e.target.value})} onBlur={(e) => handleUpdateLead('notas_internas', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 resize-none shadow-sm" placeholder="Observações do atendimento clínico..." />
+                </div>
+
+                {/* CAMPO DE VALOR DO TRATAMENTO / VENDA - POSICIONADO POR ÚLTIMO */}
+                <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200/80">
+                  <label className="text-xs font-bold text-emerald-800 uppercase block mb-1 flex items-center gap-1.5">
+                    <span>💰 Valor do Tratamento Fechado (R$)</span>
+                  </label>
+                  <input 
+                    type="number" 
+                    step="0.01" 
+                    placeholder="Ex: 3500.00" 
+                    value={leadDrawer.valor_venda ?? ''} 
+                    onChange={(e) => setLeadDrawer({...leadDrawer, valor_venda: e.target.value})} 
+                    onBlur={(e) => handleUpdateLead('valor_venda', e.target.value ? Number(e.target.value) : null)} 
+                    className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-extrabold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm" 
+                  />
+                  <span className="text-[10px] text-emerald-600 font-medium mt-1 block">
+                    Este valor soma automaticamente no painel de faturamento.
+                  </span>
                 </div>
               </div>
 
