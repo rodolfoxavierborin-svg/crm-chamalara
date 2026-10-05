@@ -84,7 +84,7 @@ const formatarTelefone = (phone?: string | null): string => {
   return phone;
 };
 
-// 100% REFATORADO E REESCRITO: Motor de Precisão de Datas
+// Motor de Precisão de Datas
 const isWithinDateRange = (dateStr: string | null, range: string, customStart?: string, customEnd?: string) => {
   if (range === 'all') return true;
   if (!dateStr) return false;
@@ -95,7 +95,6 @@ const isWithinDateRange = (dateStr: string | null, range: string, customStart?: 
   const leadTime = leadDate.getTime();
   const now = new Date();
 
-  // Resetamos as horas para 00:00 e 23:59 rigorosamente no timezone local
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
   const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
 
@@ -110,7 +109,6 @@ const isWithinDateRange = (dateStr: string | null, range: string, customStart?: 
   }
 
   if (range === 'last_7') {
-    // 7 dias trás estrito = Voltar 6 dias inteiros pra trás até o final de hoje
     const sevenDaysAgoStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0, 0).getTime();
     return leadTime >= sevenDaysAgoStart && leadTime <= todayEnd;
   }
@@ -121,7 +119,7 @@ const isWithinDateRange = (dateStr: string | null, range: string, customStart?: 
   }
 
   if (range === 'this_month') {
-    // Dia 1º do mês atual, 00:00:00 ATÉ último dia do mês atual às 23:59:59
+    // Dia 1º do mês atual (00:00:00) até o último dia do mês atual (23:59:59)
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
     return leadTime >= monthStart && leadTime <= monthEnd;
@@ -130,7 +128,6 @@ const isWithinDateRange = (dateStr: string | null, range: string, customStart?: 
   if (range === 'custom') {
     let startValid = true;
     let endValid = true;
-    // Quebra a string "YYYY-MM-DD" e força o Javascript a interpretar no fuso local meia-noite
     if (customStart) {
       const [y, m, d] = customStart.split('-').map(Number);
       const s = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
@@ -152,7 +149,10 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const [isBrowser, setIsBrowser] = useState(false);
   const [leadDrawer, setLeadDrawer] = useState<any | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [dateRange, setDateRange] = useState('all');
+  
+  // AQUI FOI A ALTERAÇÃO: Inicializa o filtro carregando direto "Este Mês"!
+  const [dateRange, setDateRange] = useState('this_month');
+  
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [unidadeFilter, setUnidadeFilter] = useState('all');
@@ -353,7 +353,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   return (
     <div className="flex flex-col h-full bg-[#F8FAFC] text-slate-800 font-sans">
       
-      {/* HEADER EM DUAS CAMADAS (TIERED HEADER) - PADRÃO ENTERPRISE 2026 */}
+      {/* HEADER EM DUAS CAMADAS */}
       <div className="bg-white border-b border-slate-200/80 z-10 sticky top-0 shadow-sm">
         
         {/* LINHA 1: NAVEGAÇÃO E AÇÕES */}
@@ -417,15 +417,14 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   onChange={(e) => setDateRange(e.target.value)} 
                   className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium outline-none focus:border-blue-500 cursor-pointer"
                 >
-                  <option value="all">Todo o Período</option>
+                  <option value="this_month">Este Mês</option>
                   <option value="today">Hoje</option>
                   <option value="yesterday">Ontem</option>
                   <option value="last_7">Últimos 7 dias</option>
-                  <option value="this_month">Este Mês</option>
+                  <option value="all">Todo o Período</option>
                   <option value="custom">Personalizado</option>
                 </select>
 
-                {/* ADICIONADO: INPUTS DO FILTRO PERSONALIZADO QUE ESTAVAM FALTANDO! */}
                 {dateRange === 'custom' && (
                   <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-lg border border-slate-200/80">
                     <input 
@@ -459,11 +458,10 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         </div>
 
-        {/* LINHA 2: BANNER DE METRICAS DO FUNIL (DESTAQUE DE PERFORMANCE) */}
+        {/* LINHA 2: BANNER DE METRICAS DO FUNIL */}
         <div className="px-6 py-3 bg-slate-50/70 flex items-center justify-between gap-4 overflow-x-auto custom-scrollbar">
           
           <div className="flex items-center gap-6 md:gap-10 shrink-0">
-            {/* Step 1 */}
             <div className="flex items-center gap-3">
               <div className="w-2.5 h-2.5 rounded-full bg-slate-400"></div>
               <div>
@@ -474,7 +472,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
             <svg className="w-4 h-4 text-slate-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
 
-            {/* Step 2 */}
             <div className="flex items-center gap-3">
               <div className="w-2.5 h-2.5 rounded-full bg-indigo-500"></div>
               <div>
@@ -488,7 +485,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
             <svg className="w-4 h-4 text-slate-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
 
-            {/* Step 3 */}
             <div className="flex items-center gap-3">
               <div className="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
               <div>
@@ -502,7 +498,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
             <svg className="w-4 h-4 text-slate-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
 
-            {/* Step 4 */}
             <div className="flex items-center gap-3">
               <div className="w-2.5 h-2.5 rounded-full bg-amber-500"></div>
               <div>
@@ -516,7 +511,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
             <svg className="w-4 h-4 text-slate-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
 
-            {/* Step 5 */}
             <div className="flex items-center gap-3">
               <div className="w-2.5 h-2.5 rounded-full bg-teal-500"></div>
               <div>
@@ -529,7 +523,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
             </div>
           </div>
 
-          {/* STATUS SLA CRÍTICO */}
           <div className="flex items-center gap-2 pl-4 border-l border-slate-200 shrink-0">
             <div className="flex flex-col items-end">
               <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider flex items-center gap-1">
@@ -599,7 +592,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                                         </p>
                                       )}
 
-                                      {/* BADGE DA DATA DE AGENDAMENTO - ENTERPRISE UI (LIMPO E SEM DUPLICIDADE) */}
                                       {lead.data_agendamento && (
                                         <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-700 bg-indigo-50/90 border border-indigo-100/80 px-2.5 py-1 rounded-lg mb-2.5 w-fit">
                                           <svg className="w-3.5 h-3.5 text-indigo-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -636,12 +628,11 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
-        {/* VIEW 2: DASHBOARD DE ANALYTICS - DESIGN ENTERPRISE REDESENHADO */}
+        {/* VIEW 2: DASHBOARD DE ANALYTICS */}
         {activeTab === 'analytics' && (
           <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scrollbar bg-[#F8FAFC]">
             <div className="max-w-7xl mx-auto space-y-10">
               
-              {/* CONTAINER DO FUNIL DE CONVERSÃO - DESIGN PREMIUM */}
               <div className="bg-white border border-slate-200/80 rounded-2xl p-6 md:p-8 shadow-sm">
                 <div className="mb-8 flex justify-between items-end border-b border-slate-100 pb-5">
                   <div>
@@ -654,10 +645,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   </div>
                 </div>
 
-                {/* ETAPAS DO FUNIL COM CARDS MODERNOS E FLUXO VETORIAL */}
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-4 relative">
                   
-                  {/* ETAPA 1: TOTAL LEADS */}
                   <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-5 flex flex-col justify-between hover:border-slate-300 transition-all shadow-sm">
                     <div className="flex justify-between items-center mb-4">
                       <div className="p-2.5 bg-slate-200/60 rounded-lg text-slate-700">
@@ -671,7 +660,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                     </div>
                   </div>
 
-                  {/* ETAPA 2: AGENDADOS */}
                   <div className="bg-indigo-50/40 border border-indigo-100 rounded-xl p-5 flex flex-col justify-between hover:border-indigo-200 transition-all shadow-sm relative">
                     <div className="flex justify-between items-center mb-4">
                       <div className="p-2.5 bg-indigo-100/80 rounded-lg text-indigo-600">
@@ -685,7 +673,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                     </div>
                   </div>
 
-                  {/* ETAPA 3: CONFIRMADOS */}
                   <div className="bg-emerald-50/40 border border-emerald-100 rounded-xl p-5 flex flex-col justify-between hover:border-emerald-200 transition-all shadow-sm">
                     <div className="flex justify-between items-center mb-4">
                       <div className="p-2.5 bg-emerald-100/80 rounded-lg text-emerald-600">
@@ -699,7 +686,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                     </div>
                   </div>
 
-                  {/* ETAPA 4: NA CLINICA */}
                   <div className="bg-amber-50/40 border border-amber-100 rounded-xl p-5 flex flex-col justify-between hover:border-amber-200 transition-all shadow-sm">
                     <div className="flex justify-between items-center mb-4">
                       <div className="p-2.5 bg-amber-100/80 rounded-lg text-amber-600">
@@ -713,7 +699,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                     </div>
                   </div>
 
-                  {/* ETAPA 5: VENDAS */}
                   <div className="bg-teal-50/50 border border-teal-200/80 rounded-xl p-5 flex flex-col justify-between hover:border-teal-300 transition-all shadow-sm">
                     <div className="flex justify-between items-center mb-4">
                       <div className="p-2.5 bg-teal-100 rounded-lg text-teal-700">
@@ -729,7 +714,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
                 </div>
 
-                {/* BANNER DE CONVERSÃO GLOBAL HERO */}
                 <div className="mt-6 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-xl p-6 text-white flex flex-col sm:flex-row justify-between items-center gap-4 shadow-lg border border-slate-800">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-xl bg-teal-500/20 border border-teal-500/30 flex items-center justify-center text-teal-400 shrink-0">
@@ -747,7 +731,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
               </div>
 
-              {/* GRÁFICOS INFERIORES REDESENHADOS */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2 bg-white border border-slate-200/80 rounded-2xl p-7 shadow-sm flex flex-col justify-between">
                   <div className="flex justify-between items-start mb-6">
