@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
@@ -37,7 +37,7 @@ const OPCOES_FEEDBACK_PADRAO = [
 ];
 
 const getTempoCronologico = (lead: any) => {
-  const data = lead['última_interação'] || lead.ultima_interacao || lead.created_at || lead.data_agendamento;
+  const data = lead.ultima_interacao || lead['última_interação'] || lead.created_at || lead.data_agendamento;
   return data ? new Date(data).getTime() : 0;
 };
 
@@ -68,6 +68,41 @@ const formatarDataAgendamento = (dateStr?: string | null): string => {
   } catch {
     return '';
   }
+};
+
+const formatarDataCurta = (dateStr?: string | null): string => {
+  if (!dateStr) return '';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('pt-BR');
+  } catch {
+    return '';
+  }
+};
+
+const formatarDataInput = (isoDate?: string | null): string => {
+  if (!isoDate) return '';
+  try {
+    const date = new Date(isoDate);
+    if (isNaN(date.getTime())) return '';
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  } catch {
+    return '';
+  }
+};
+
+const dateInputToISO = (dateStr: string): string | null => {
+  if (!dateStr) return null;
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return null;
+  const y = Number(parts[0]);
+  const m = Number(parts[1]) - 1;
+  const d = Number(parts[2]);
+  return new Date(y, m, d, 12, 0, 0).toISOString();
 };
 
 const formatarTelefone = (phone?: string | null): string => {
@@ -191,13 +226,29 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     if (!error) setLeads(data || []);
   };
 
+  // OTIMIZAÇÃO SÊNIOR: Arrasto inteligente que atualiza timestamps relevantes
   const handleDragEnd = async (result: any) => {
     const { destination, source, draggableId } = result;
     if (!destination) return;
     if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+    
     const newStatus = destination.droppableId;
-    setLeads((prev) => prev.map((l) => (l.id === draggableId ? { ...l, status: newStatus } : l)));
-    await supabase.from('dentup_leads').update({ status: newStatus }).eq('id', draggableId);
+    const agoraISO = new Date().toISOString();
+
+    let updates: any = { 
+      status: newStatus,
+      ultima_interacao: agoraISO 
+    };
+
+    if (newStatus === 'vendido') {
+      const leadEncontrado = leads.find(l => l.id === draggableId);
+      if (leadEncontrado && !leadEncontrado.data_venda) {
+        updates.data_venda = agoraISO;
+      }
+    }
+
+    setLeads((prev) => prev.map((l) => (l.id === draggableId ? { ...l, ...updates } : l)));
+    await supabase.from('dentup_leads').update(updates).eq('id', draggableId);
   };
 
   const handleUpdateLead = async (campo: string, valor: any) => {
@@ -250,36 +301,68 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   };
 
   const targetUnidade = (!isAdmin && userUnidade && userUnidade !== 'Todas' && userUnidade !== 'all') ? userUnidade : unidadeFilter;
-  const leadsNoPeriodo = leads.filter((lead) => isWithinDateRange(lead.created_at || lead.ultima_interacao || lead['última_interação'], dateRange, customStart, customEnd));
   
-  const leadsNaUnidade = leadsNoPeriodo.filter((lead) => {
-    if (targetUnidade === 'all' || targetUnidade === 'Todas') return true;
-    const leadUnid = lead.unidade || lead.unit || 'Pendente';
-    return leadUnid.toLowerCase() === targetUnidade.toLowerCase();
-  });
+  const leadsNaUnidadeGlobal = useMemo(() => {
+    return leads.filter((lead) => {
+      if (targetUnidade === 'all' || targetUnidade === 'Todas') return true;
+      const leadUnid = lead.unidade || lead.unit || 'Pendente';
+      return leadUnid.toLowerCase() === targetUnidade.toLowerCase();
+    });
+  }, [leads, targetUnidade]);
 
-  const leadsFiltrados = leadsNaUnidade.filter((lead) => {
+  // OTIMIZAÇÃO SÊNIOR: Função de filtro por data adaptativa por contexto da etapa
+  const leadsVisiveisKanban = useMemo(() => {
+    return leadsNaUnidadeGlobal.filter((lead) => {
+      if (dateRange === 'all') return true;
+
+      // Determina a data mais relevante com base no status do paciente
+      let dataParaFiltrar = lead.created_at;
+
+      if (lead.status === 'vendido') {
+        dataParaFiltrar = lead.data_venda || lead.ultima_interacao || lead.created_at;
+      } else if (['agendado', 'confirmado', 'na_clinica', 'no_show'].includes(lead.status)) {
+        dataParaFiltrar = lead.data_agendamento || lead.ultima_interacao || lead.created_at;
+      } else if (['nao_vendido', 'encerrado'].includes(lead.status)) {
+        dataParaFiltrar = lead.ultima_interacao || lead.created_at;
+      }
+
+      return isWithinDateRange(dataParaFiltrar, dateRange, customStart, customEnd);
+    });
+  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
+
+  const leadsFiltrados = useMemo(() => {
     const termo = searchTerm.toLowerCase().trim();
-    return (lead.name || '').toLowerCase().includes(termo) || (lead.phone || lead.phone_number || '').toLowerCase().includes(termo);
-  });
+    if (!termo) return leadsVisiveisKanban;
+    return leadsVisiveisKanban.filter((lead) => {
+      return (lead.name || '').toLowerCase().includes(termo) || (lead.phone || lead.phone_number || '').toLowerCase().includes(termo);
+    });
+  }, [leadsVisiveisKanban, searchTerm]);
 
-  // METRICAS DE CONVERSAO CUMULATIVA E FINANCEIRAS
-  const totalLeads = leadsNaUnidade.length;
-  const totalEstagnados = leadsNaUnidade.filter(l => getHorasParado(l) >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(l.status)).length;
-  const agendados = leadsNaUnidade.filter(l => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length;
-  const confirmados = leadsNaUnidade.filter(l => ['confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length;
-  const compareceram = leadsNaUnidade.filter(l => ['na_clinica', 'vendido', 'nao_vendido'].includes(l.status)).length;
-  const vendidos = leadsNaUnidade.filter(l => l.status === 'vendido').length;
+  // MÉTRICAS DE CONVERSÃO DO FUNIL (Memoizadas)
+  const funilLeadsPeriodo = useMemo(() => {
+    return leadsNaUnidadeGlobal.filter((lead) => 
+      isWithinDateRange(lead.created_at || lead.ultima_interacao || lead['última_interação'], dateRange, customStart, customEnd)
+    );
+  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
-  const faturamentoTotal = leadsNaUnidade
-    .filter(l => l.status === 'vendido')
-    .reduce((acc, l) => acc + (Number(l.valor_venda) || 0), 0);
+  const totalLeads = funilLeadsPeriodo.length;
+  const totalEstagnados = useMemo(() => funilLeadsPeriodo.filter(l => getHorasParado(l) >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(l.status)).length, [funilLeadsPeriodo]);
+  const agendados = useMemo(() => funilLeadsPeriodo.filter(l => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
+  const confirmados = useMemo(() => funilLeadsPeriodo.filter(l => ['confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
+  const compareceram = useMemo(() => funilLeadsPeriodo.filter(l => ['na_clinica', 'vendido', 'nao_vendido'].includes(l.status)).length, [funilLeadsPeriodo]);
+
+  // MÉTRICAS FINANCEIRAS (Memoizadas por Data da Venda)
+  const vendasRealizadas = useMemo(() => {
+    return leadsNaUnidadeGlobal.filter(l => l.status === 'vendido' && isWithinDateRange(l.data_venda || l.created_at || l.ultima_interacao, dateRange, customStart, customEnd));
+  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
+
+  const vendidos = vendasRealizadas.length;
+  const faturamentoTotal = useMemo(() => vendasRealizadas.reduce((acc, l) => acc + (Number(l.valor_venda) || 0), 0), [vendasRealizadas]);
 
   const taxaAgendamento = totalLeads > 0 ? ((agendados / totalLeads) * 100).toFixed(1) : '0.0';
   const taxaConfirmacao = agendados > 0 ? ((confirmados / agendados) * 100).toFixed(1) : '0.0';
   const taxaComparecimento = confirmados > 0 ? ((compareceram / confirmados) * 100).toFixed(1) : '0.0';
   const taxaFechamento = compareceram > 0 ? ((vendidos / compareceram) * 100).toFixed(1) : '0.0';
-  const taxaConversaoGlobal = totalLeads > 0 ? ((vendidos / totalLeads) * 100).toFixed(1) : '0.0';
 
   const getGoogleCalendarUrl = () => {
     const baseUrl = "https://calendar.google.com/calendar/embed?ctz=America%2FSao_Paulo&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=1&showTz=0&mode=WEEK";
@@ -291,20 +374,21 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     return `${baseUrl}${allSources}`;
   };
 
-  if (!isBrowser) return null;
-
   const procedimentoAtual = leadDrawer?.procedimento || 'Não Informado';
   const opcoesProcedimento = OPCOES_PROCEDIMENTO_PADRAO.includes(procedimentoAtual) ? OPCOES_PROCEDIMENTO_PADRAO : [procedimentoAtual, ...OPCOES_PROCEDIMENTO_PADRAO];
   const feedbackAtual = leadDrawer?.feedback || 'Não Informado';
   const opcoesFeedback = OPCOES_FEEDBACK_PADRAO.includes(feedbackAtual) ? OPCOES_FEEDBACK_PADRAO : [feedbackAtual, ...OPCOES_FEEDBACK_PADRAO];
 
-  const procsCount: Record<string, number> = {};
-  leadsNaUnidade.forEach(l => {
-    const p = l.procedimento || 'Não Informado';
-    procsCount[p] = (procsCount[p] || 0) + 1;
-  });
+  const procsCount = useMemo(() => {
+    const counts: Record<string, number> = {};
+    funilLeadsPeriodo.forEach(l => {
+      const p = l.procedimento || 'Não Informado';
+      counts[p] = (counts[p] || 0) + 1;
+    });
+    return counts;
+  }, [funilLeadsPeriodo]);
 
-  const gerarDadosEvolucaoDeterministica = () => {
+  const chartBuckets = useMemo(() => {
     const now = new Date();
     const buckets: { label: string; total: number; agendados: number }[] = [];
     if (dateRange === 'today') {
@@ -313,7 +397,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
         const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h - 2, 0, 0).getTime();
         const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, 0, 0).getTime();
         const label = `${h.toString().padStart(2, '0')}:00`;
-        const leadsNoIntervalo = leadsNaUnidade.filter((l) => {
+        const leadsNoIntervalo = leadsNaUnidadeGlobal.filter((l) => {
           const t = getTempoCronologico(l);
           return t >= start && t < end;
         });
@@ -328,7 +412,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
         const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).getTime();
         const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).getTime();
         const label = i === 0 ? 'Hoje' : `${diasSemana[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
-        const leadsNoDia = leadsNaUnidade.filter((l) => {
+        const leadsNoDia = leadsNaUnidadeGlobal.filter((l) => {
           const t = getTempoCronologico(l);
           return t >= start && t <= end;
         });
@@ -337,14 +421,14 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       }
     }
     return buckets;
-  };
+  }, [dateRange, leadsNaUnidadeGlobal]);
 
-  const chartBuckets = gerarDadosEvolucaoDeterministica();
   const svgWidth = 600, svgHeight = 200, paddingX = 40, paddingY = 30;
   const plotWidth = svgWidth - paddingX * 2, plotHeight = svgHeight - paddingY * 2;
-  const maxVal = Math.max(...chartBuckets.map((b) => b.total), 5);
-  const pointsTotal = chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / (chartBuckets.length - 1)), y: paddingY + plotHeight - (b.total / maxVal) * plotHeight, val: b.total }));
-  const pointsAgendados = chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / (chartBuckets.length - 1)), y: paddingY + plotHeight - (b.agendados / maxVal) * plotHeight, val: b.agendados }));
+  const maxVal = useMemo(() => Math.max(...chartBuckets.map((b) => b.total), 5), [chartBuckets]);
+  
+  const pointsTotal = useMemo(() => chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / (chartBuckets.length - 1)), y: paddingY + plotHeight - (b.total / maxVal) * plotHeight, val: b.total })), [chartBuckets, maxVal]);
+  const pointsAgendados = useMemo(() => chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / (chartBuckets.length - 1)), y: paddingY + plotHeight - (b.agendados / maxVal) * plotHeight, val: b.agendados })), [chartBuckets, maxVal]);
   
   const generateLinePath = (pts: { x: number; y: number }[]) => pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
   const generateAreaPath = (pts: { x: number; y: number }[]) => {
@@ -352,6 +436,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     const lastX = pts[pts.length - 1].x.toFixed(1), firstX = pts[0].x.toFixed(1), bottomY = (paddingY + plotHeight).toFixed(1);
     return `${line} L ${lastX} ${bottomY} L ${firstX} ${bottomY} Z`;
   };
+
+  if (!isBrowser) return null;
 
   return (
     <div className="flex flex-col h-full bg-[#F8FAFC] text-slate-800 font-sans">
@@ -602,10 +688,17 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                                         </p>
                                       )}
 
-                                      {/* BADGE DE VALOR DE VENDA NO CARD DO KANBAN */}
+                                      {/* BADGE DE VALOR DE VENDA NO CARD DO KANBAN COM DATA DA VENDA */}
                                       {lead.valor_venda && Number(lead.valor_venda) > 0 && (
-                                        <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-md mb-2 w-fit">
-                                          💰 {formatarMoeda(lead.valor_venda)}
+                                        <div className="flex flex-col gap-1.5 mb-2 w-fit">
+                                          <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-md">
+                                            💰 {formatarMoeda(lead.valor_venda)}
+                                          </div>
+                                          {lead.data_venda && (
+                                            <div className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-white border border-emerald-100 px-2 py-0.5 rounded shadow-sm w-fit">
+                                              📅 Venda: {formatarDataCurta(lead.data_venda)}
+                                            </div>
+                                          )}
                                         </div>
                                       )}
 
@@ -738,7 +831,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                     </div>
                     <div>
                       <h4 className="text-sm font-bold text-slate-100 uppercase tracking-wider">Faturamento do Período</h4>
-                      <p className="text-xs text-slate-400 mt-0.5">Soma total das vendas de tratamentos fechados no período selecionado.</p>
+                      <p className="text-xs text-slate-400 mt-0.5">Calculado automaticamente pela <strong>Data de Venda</strong> dos tratamentos fechados.</p>
                     </div>
                   </div>
                   <div className="text-3xl font-black text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-5 py-2 rounded-xl shrink-0">
@@ -950,7 +1043,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
-        {/* GAVETA LATERAL DO CLIENTE - VALOR DA VENDA POSICIONADO POR ÚLTIMO */}
+        {/* FICHA DO PACIENTE (GAVETA LATERAL CORRIGIDA) */}
         {leadDrawer && (
           <>
             <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm z-20" onClick={() => setLeadDrawer(null)} />
@@ -1006,23 +1099,44 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <textarea rows={4} value={leadDrawer.notas_internas || ''} onChange={(e) => setLeadDrawer({...leadDrawer, notas_internas: e.target.value})} onBlur={(e) => handleUpdateLead('notas_internas', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 resize-none shadow-sm" placeholder="Observações do atendimento clínico..." />
                 </div>
 
-                {/* CAMPO DE VALOR DO TRATAMENTO / VENDA - POSICIONADO POR ÚLTIMO */}
-                <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200/80">
-                  <label className="text-xs font-bold text-emerald-800 uppercase block mb-1 flex items-center gap-1.5">
-                    <span>💰 Valor do Tratamento Fechado (R$)</span>
-                  </label>
-                  <input 
-                    type="number" 
-                    step="0.01" 
-                    placeholder="Ex: 3500.00" 
-                    value={leadDrawer.valor_venda ?? ''} 
-                    onChange={(e) => setLeadDrawer({...leadDrawer, valor_venda: e.target.value})} 
-                    onBlur={(e) => handleUpdateLead('valor_venda', e.target.value ? Number(e.target.value) : null)} 
-                    className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-extrabold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm" 
-                  />
-                  <span className="text-[10px] text-emerald-600 font-medium mt-1 block">
-                    Este valor soma automaticamente no painel de faturamento.
-                  </span>
+                {/* BLOCO FINANCEIRO COM DATA DA VENDA CONECTADA AO SUPABASE */}
+                <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200/80 space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-emerald-800 uppercase block mb-1 flex items-center gap-1.5">
+                      <span>💰 Valor do Tratamento Fechado (R$)</span>
+                    </label>
+                    <input 
+                      type="number" 
+                      step="0.01" 
+                      placeholder="Ex: 3500.00" 
+                      value={leadDrawer.valor_venda ?? ''} 
+                      onChange={(e) => setLeadDrawer({...leadDrawer, valor_venda: e.target.value})} 
+                      onBlur={(e) => handleUpdateLead('valor_venda', e.target.value ? Number(e.target.value) : null)} 
+                      className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-extrabold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm" 
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-emerald-800 uppercase block mb-1 flex items-center gap-1.5">
+                      <span>📅 Data da Venda</span>
+                    </label>
+                    <input 
+                      type="date" 
+                      value={formatarDataInput(leadDrawer.data_venda)} 
+                      onChange={(e) => {
+                        const isoStr = dateInputToISO(e.target.value);
+                        setLeadDrawer({...leadDrawer, data_venda: isoStr});
+                      }} 
+                      onBlur={(e) => {
+                        const isoStr = dateInputToISO(e.target.value);
+                        handleUpdateLead('data_venda', isoStr);
+                      }}
+                      className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-semibold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm cursor-pointer" 
+                    />
+                    <span className="text-[10px] text-emerald-600 font-medium mt-1.5 block leading-tight">
+                      Esta data direciona o <strong>faturamento para o mês correto</strong> nos Analytics, independente de quando o paciente entrou.
+                    </span>
+                  </div>
                 </div>
               </div>
 
