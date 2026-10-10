@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '../lib/supabase';
 import KanbanBoard from '../components/KanbanBoard';
 
+// HELPER: Formatação resumida para a barra lateral
 const formatarHorario = (dataIso: string | null) => {
   if (!dataIso) return '';
   const data = new Date(dataIso);
@@ -13,6 +14,18 @@ const formatarHorario = (dataIso: string | null) => {
     return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   }
   return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+};
+
+// HELPER: Formatação do separador de data do chat (Padrão WhatsApp)
+const formatDateSeparator = (date: Date) => {
+  const hoje = new Date();
+  const ontem = new Date();
+  ontem.setDate(ontem.getDate() - 1);
+
+  if (date.toDateString() === hoje.toDateString()) return 'Hoje';
+  if (date.toDateString() === ontem.toDateString()) return 'Ontem';
+
+  return date.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
 };
 
 const getUltimaInteracao = (lead: any) => {
@@ -78,6 +91,9 @@ export default function HomePage() {
   const [savingMember, setSavingMember] = useState(false);
   const [teamError, setTeamError] = useState('');
   const [teamSuccess, setTeamSuccess] = useState('');
+
+  // Variável de controle para o renderizador do chat (Linha do Tempo)
+  let lastDateGroup = '';
 
   // 1. CHECAGEM DE AUTENTICAÇÃO E SESSÃO
   useEffect(() => {
@@ -217,7 +233,7 @@ export default function HomePage() {
     };
   }, [loadingAuth]);
 
-  // 3. BUSCA E ESCUTA DE MENSAGENS EM TEMPO REAL (SEM FILTRO QUEBRADO DE STRING)
+  // 3. BUSCA E ESCUTA DE MENSAGENS EM TEMPO REAL
   useEffect(() => {
     if (!selectedLead || loadingAuth) return;
 
@@ -271,8 +287,12 @@ export default function HomePage() {
     };
   }, [selectedLead?.id, selectedLead?.phone, selectedLead?.phone_number, loadingAuth]);
 
+  // SCROLL AUTOMÁTICO PARA A ÚLTIMA MENSAGEM
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Timeout pequeno garante que a renderização do React terminou antes do scroll
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }, 100);
   }, [messages]);
 
   const handleLogout = async () => {
@@ -434,7 +454,7 @@ export default function HomePage() {
                   return (
                     <li key={lead.id} onClick={() => setSelectedLead(lead)}
                       className={`cursor-pointer p-3 transition-all border-b border-slate-100 flex gap-3 items-center ${
-                        isSelected ? 'bg-blue-50/80' : 'hover:bg-slate-50'
+                        isSelected ? 'bg-blue-50/80 border-l-4 border-l-blue-600' : 'hover:bg-slate-50'
                       }`}
                     >
                       {photo ? (
@@ -497,44 +517,67 @@ export default function HomePage() {
                     </button>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-3 relative z-10 custom-scrollbar">
-                    {messages.map((msg) => {
-                      if (isMensagemTecnica(msg)) return null;
-                      const { type, content } = parseMensagem(msg);
+                  {/* CONTAINER DE MENSAGENS E LINHA DO TEMPO */}
+                  <div className="flex-1 overflow-y-auto p-3 md:p-4 relative z-10 custom-scrollbar">
+                    <div className="flex flex-col space-y-3 pb-4">
+                      {messages.map((msg) => {
+                        if (isMensagemTecnica(msg)) return null;
+                        
+                        const msgDate = new Date(msg.created_at || Date.now());
+                        const currentDateGroup = msgDate.toLocaleDateString('pt-BR');
+                        const isNewDate = currentDateGroup !== lastDateGroup;
+                        
+                        if (isNewDate) {
+                          lastDateGroup = currentDateGroup;
+                        }
 
-                      const isPatient = type === 'human' || type === 'user';
-                      const isAI = type === 'ai' || type === 'assistant';
-                      
-                      const baloes = (content || '').split('###').map((t: string) => t.trim()).filter((t: string) => t.length > 0);
+                        const { type, content } = parseMensagem(msg);
+                        const isPatient = type === 'human' || type === 'user';
+                        const isAI = type === 'ai' || type === 'assistant';
+                        const baloes = (content || '').split('###').map((t: string) => t.trim()).filter((t: string) => t.length > 0);
 
-                      return (
-                        <React.Fragment key={msg.id}>
-                          {baloes.map((texto: string, index: number) => {
-                            return (
-                              <div key={`${msg.id}-${index}`} className={`flex ${isPatient ? 'justify-start' : 'justify-end'}`}>
-                                <div className={`max-w-[85%] md:max-w-md rounded-2xl p-3 shadow-sm relative ${
-                                    isPatient ? 'bg-white text-slate-800 rounded-tl-none border border-slate-100/80' : 'bg-[#D9FDD3] text-slate-800 rounded-tr-none'
-                                  }`}
-                                >
-                                  <span className={`block text-[11px] font-bold mb-1 notranslate ${
-                                    isPatient ? 'text-slate-400' : isAI ? 'text-emerald-700' : 'text-emerald-800'
-                                  }`}>
-                                    {isPatient ? 'Paciente' : isAI ? 'Lara (IA)' : 'Você (Atendente)'}
-                                  </span>
-
-                                  <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{texto}</p>
-
-                                  <span className="block text-[10px] text-right mt-1.5 text-slate-400">
-                                    {new Date(msg.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </span>
-                                </div>
+                        return (
+                          <React.Fragment key={msg.id}>
+                            {/* SEPARADOR DE DATA ESTILO WHATSAPP */}
+                            {isNewDate && (
+                              <div className="flex justify-center my-4 opacity-90">
+                                <span className="bg-slate-200/80 backdrop-blur-sm text-slate-600 text-[11px] font-bold px-3 py-1 rounded-lg shadow-sm uppercase tracking-wide">
+                                  {formatDateSeparator(msgDate)}
+                                </span>
                               </div>
-                            );
-                          })}
-                        </React.Fragment>
-                      );
-                    })}
-                    <div ref={messagesEndRef} />
+                            )}
+
+                            {baloes.map((texto: string, index: number) => {
+                              return (
+                                <div key={`${msg.id}-${index}`} className={`flex ${isPatient ? 'justify-start' : 'justify-end'}`}>
+                                  <div className={`max-w-[85%] md:max-w-md rounded-2xl p-3 shadow-sm relative ${
+                                      isPatient ? 'bg-white text-slate-800 rounded-tl-none border border-slate-100/80' : 'bg-[#D9FDD3] text-slate-800 rounded-tr-none'
+                                    }`}
+                                  >
+                                    <span className={`block text-[11px] font-bold mb-1 notranslate ${
+                                      isPatient ? 'text-slate-400' : isAI ? 'text-emerald-700' : 'text-emerald-800'
+                                    }`}>
+                                      {isPatient ? 'Paciente' : isAI ? 'Lara (IA)' : 'Você (Atendente)'}
+                                    </span>
+
+                                    <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{texto}</p>
+
+                                    {/* HORA NO BALÃO (Apenas HH:mm) */}
+                                    <span 
+                                      className="block text-[10px] text-right mt-1.5 text-slate-400"
+                                      title={msgDate.toLocaleString('pt-BR')}
+                                    >
+                                      {msgDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </React.Fragment>
+                        );
+                      })}
+                      <div ref={messagesEndRef} />
+                    </div>
                   </div>
 
                   <div className="p-2.5 md:p-3 bg-slate-50 h-[58px] md:h-[64px] shrink-0 flex items-center z-10 border-t border-slate-200">
