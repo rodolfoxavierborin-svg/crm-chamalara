@@ -9,6 +9,7 @@ import KanbanBoard from '../components/KanbanBoard';
 const formatarHorario = (dataIso: string | null) => {
   if (!dataIso) return '';
   const data = new Date(dataIso);
+  if (isNaN(data.getTime())) return '';
   const hoje = new Date();
   if (data.toDateString() === hoje.toDateString()) {
     return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -91,9 +92,6 @@ export default function HomePage() {
   const [savingMember, setSavingMember] = useState(false);
   const [teamError, setTeamError] = useState('');
   const [teamSuccess, setTeamSuccess] = useState('');
-
-  // Variável de controle para o renderizador do chat (Linha do Tempo)
-  let lastDateGroup = '';
 
   // 1. CHECAGEM DE AUTENTICAÇÃO E SESSÃO
   useEffect(() => {
@@ -205,9 +203,12 @@ export default function HomePage() {
 
     const globalMessagesChannel = supabase
       .channel('global-messages-sidebar-channel')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
         const newMsg = payload.new;
         if (!newMsg || !newMsg.session_id) return;
+
+        // TRAVA SÊNIOR: Ignora mensagens técnicas/automáticas de ferramentas (n8n/IA)
+        if (isMensagemTecnica(newMsg)) return;
 
         const cleanPhoneFromSession = newMsg.session_id.replace('dentup_', '');
 
@@ -215,10 +216,11 @@ export default function HomePage() {
           return currLeads.map((lead) => {
             const leadPhone = (lead.phone || lead.phone_number || '').replace(/\D/g, '');
             if (leadPhone === cleanPhoneFromSession) {
+              const msgDate = newMsg.created_at || new Date().toISOString();
               return {
                 ...lead,
-                ultima_interacao: newMsg.created_at || new Date().toISOString(),
-                'última_interação': newMsg.created_at || new Date().toISOString()
+                ultima_interacao: msgDate,
+                'última_interação': msgDate
               };
             }
             return lead;
@@ -289,7 +291,6 @@ export default function HomePage() {
 
   // SCROLL AUTOMÁTICO PARA A ÚLTIMA MENSAGEM
   useEffect(() => {
-    // Timeout pequeno garante que a renderização do React terminou antes do scroll
     setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }, 100);
@@ -375,6 +376,9 @@ export default function HomePage() {
       return leadUnidade.toLowerCase() === userUnidade.toLowerCase();
     })
     .sort((a, b) => getUltimaInteracao(b) - getUltimaInteracao(a));
+
+  // Variável de controle para agrupamento de datas no chat (resetada a cada render)
+  let lastDateGroup = '';
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans notranslate" translate="no">
@@ -562,7 +566,7 @@ export default function HomePage() {
 
                                     <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{texto}</p>
 
-                                    {/* HORA NO BALÃO (Apenas HH:mm) */}
+                                    {/* HORA NO BALÃO */}
                                     <span 
                                       className="block text-[10px] text-right mt-1.5 text-slate-400"
                                       title={msgDate.toLocaleString('pt-BR')}
