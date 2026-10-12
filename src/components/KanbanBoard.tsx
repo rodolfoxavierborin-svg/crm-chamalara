@@ -4,29 +4,6 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
-// 1. PARSER SEGURO GLOBAL
-const parseDataSegura = (dateStr: string | null | undefined): number => {
-  if (!dateStr) return 0;
-  const safeStr = typeof dateStr === 'string' ? dateStr.trim().replace(' ', 'T') : dateStr;
-  const time = new Date(safeStr).getTime();
-  return isNaN(time) ? 0 : time;
-};
-
-// 2. PARSER DE FUSO HORÁRIO (Trava a data no fuso local do navegador/Brasil, evitando o bug do UTC)
-const getLocalDateString = (dateStr: string | null | undefined): string => {
-  if (!dateStr) return '';
-  const trimmed = dateStr.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed; // Já é YYYY-MM-DD
-  
-  const d = new Date(trimmed.replace(' ', 'T'));
-  if (isNaN(d.getTime())) return '';
-  
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
 const COLUNAS = [
   { id: 'novo', titulo: 'Novos Pacientes', dot: 'bg-blue-500' },
   { id: 'nao_respondeu', titulo: 'Não Respondeu', dot: 'bg-amber-500' },
@@ -59,12 +36,14 @@ const OPCOES_FEEDBACK_PADRAO = [
   'SEM INTERESSE', 'VOU FALAR COM A FAMILIA', 'SEM DINHEIRO'
 ];
 
+// ORQUESTRA: Motor de tempo EXCLUSIVO para o Kanban (Não usa mais ultima_interacao)
 const getTempoCronologicoKanban = (lead: any) => {
-  const timeMovimentacao = parseDataSegura(lead.data_movimentacao);
-  if (timeMovimentacao > 0) return timeMovimentacao;
-  return parseDataSegura(lead.created_at);
+  // Prioridade: 1º Quando foi movido no Kanban, 2º Quando foi criado.
+  const data = lead.data_movimentacao || lead.created_at;
+  return data ? new Date(data).getTime() : 0;
 };
 
+// ORQUESTRA: Calcula horas parado na coluna baseado na movimentação, não no chat
 const getHorasParado = (lead: any): number => {
   const timeMs = getTempoCronologicoKanban(lead);
   if (!timeMs) return 0;
@@ -81,32 +60,42 @@ const formatarTempoParado = (horas: number): string => {
 
 const formatarDataAgendamento = (dateStr?: string | null): string => {
   if (!dateStr) return '';
-  const time = parseDataSegura(dateStr);
-  if (!time) return '';
-  const date = new Date(time);
-  const dia = date.getDate().toString().padStart(2, '0');
-  const mes = (date.getMonth() + 1).toString().padStart(2, '0');
-  const horas = date.getHours().toString().padStart(2, '0');
-  const minutos = date.getMinutes().toString().padStart(2, '0');
-  return `${dia}/${mes} às ${horas}:${minutos}`;
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '';
+    const dia = date.getDate().toString().padStart(2, '0');
+    const mes = (date.getMonth() + 1).toString().padStart(2, '0');
+    const horas = date.getHours().toString().padStart(2, '0');
+    const minutos = date.getMinutes().toString().padStart(2, '0');
+    return `${dia}/${mes} às ${horas}:${minutos}`;
+  } catch {
+    return '';
+  }
 };
 
 const formatarDataCurta = (dateStr?: string | null): string => {
   if (!dateStr) return '';
-  const time = parseDataSegura(dateStr);
-  if (!time) return '';
-  return new Date(time).toLocaleDateString('pt-BR');
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('pt-BR');
+  } catch {
+    return '';
+  }
 };
 
 const formatarDataInput = (isoDate?: string | null): string => {
   if (!isoDate) return '';
-  const time = parseDataSegura(isoDate);
-  if (!time) return '';
-  const date = new Date(time);
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  try {
+    const date = new Date(isoDate);
+    if (isNaN(date.getTime())) return '';
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  } catch {
+    return '';
+  }
 };
 
 const dateInputToISO = (dateStr: string): string | null => {
@@ -136,50 +125,56 @@ const formatarMoeda = (val?: number | string | null): string => {
   return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
-// 3. FILTRO DE DATA BLINDADO (Compara apenas AAAA-MM-DD local)
 const isWithinDateRange = (dateStr: string | null, range: string, customStart?: string, customEnd?: string) => {
   if (range === 'all') return true;
   if (!dateStr) return false;
+  
+  const leadDate = new Date(dateStr);
+  if (isNaN(leadDate.getTime())) return false;
 
-  const leadDate = getLocalDateString(dateStr);
-  if (!leadDate) return false;
-
+  const leadTime = leadDate.getTime();
   const now = new Date();
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-  if (range === 'today') return leadDate === todayStr;
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+
+  if (range === 'today') return leadTime >= todayStart && leadTime <= todayEnd;
 
   if (range === 'yesterday') {
-    const yesterday = new Date(now);
-    yesterday.setDate(now.getDate() - 1);
-    const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
-    return leadDate === yesterdayStr;
+    const yStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0).getTime();
+    const yEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999).getTime();
+    return leadTime >= yStart && leadTime <= yEnd;
   }
 
   if (range === 'last_7') {
-    const sevenDaysAgo = new Date(now);
-    sevenDaysAgo.setDate(now.getDate() - 6);
-    const sevenDaysAgoStr = getLocalDateString(sevenDaysAgo.toISOString());
-    return leadDate >= sevenDaysAgoStr && leadDate <= todayStr;
+    const sevenDaysAgoStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0, 0).getTime();
+    return leadTime >= sevenDaysAgoStart && leadTime <= todayEnd;
   }
 
   if (range === 'last_30') {
-    const thirtyDaysAgo = new Date(now);
-    thirtyDaysAgo.setDate(now.getDate() - 29);
-    const thirtyDaysAgoStr = getLocalDateString(thirtyDaysAgo.toISOString());
-    return leadDate >= thirtyDaysAgoStr && leadDate <= todayStr;
+    const thirtyDaysAgoStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29, 0, 0, 0, 0).getTime();
+    return leadTime >= thirtyDaysAgoStart && leadTime <= todayEnd;
   }
 
   if (range === 'this_month') {
-    const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    return leadDate.startsWith(currentMonthPrefix);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+    return leadTime >= monthStart && leadTime <= monthEnd;
   }
 
   if (range === 'custom') {
-    let valid = true;
-    if (customStart) valid = valid && leadDate >= customStart;
-    if (customEnd) valid = valid && leadDate <= customEnd;
-    return valid;
+    let startValid = true, endValid = true;
+    if (customStart) {
+      const [y, m, d] = customStart.split('-').map(Number);
+      const s = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+      startValid = leadTime >= s;
+    }
+    if (customEnd) {
+      const [y, m, d] = customEnd.split('-').map(Number);
+      const e = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+      endValid = leadTime <= e;
+    }
+    return startValid && endValid;
   }
 
   return true;
@@ -199,7 +194,13 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const [isNewPatientModalOpen, setIsNewPatientModalOpen] = useState(false);
   const [savingPatient, setSavingPatient] = useState(false);
   const [newPatientForm, setNewPatientForm] = useState({
-    name: '', phone: '', unidade: 'Santo André', procedimento: 'Avaliação Geral', promotor: 'Passante de Rua', notas_internas: '', valor_venda: ''
+    name: '',
+    phone: '',
+    unidade: 'Santo André',
+    procedimento: 'Avaliação Geral',
+    promotor: 'Passante de Rua',
+    notas_internas: '',
+    valor_venda: ''
   });
 
   const cargoNormalized = userProfile?.cargo?.toLowerCase().trim() || '';
@@ -227,6 +228,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     if (!error) setLeads(data || []);
   };
 
+  // ORQUESTRA: Função de Drag Inteligente.
   const handleDragEnd = async (result: any) => {
     const { destination, source, draggableId } = result;
     if (!destination) return;
@@ -235,6 +237,9 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     const newStatus = destination.droppableId;
     const agoraISO = new Date().toISOString();
 
+    // AQUI ESTÁ A CORREÇÃO MESTRA:
+    // Nós paramos de enviar 'ultima_interacao'. 
+    // Em vez disso, enviamos para 'data_movimentacao', preservando a ordem do Chat.
     let updates: any = { 
       status: newStatus,
       data_movimentacao: agoraISO 
@@ -277,8 +282,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       valor_venda: newPatientForm.valor_venda ? Number(newPatientForm.valor_venda) : null,
       status: 'novo',
       is_paused: true,
-      created_at: new Date().toISOString(),
-      data_movimentacao: new Date().toISOString()
+      created_at: new Date().toISOString()
     };
 
     const { error } = await supabase.from('dentup_leads').insert([payload]).select();
@@ -289,7 +293,13 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     } else {
       setIsNewPatientModalOpen(false);
       setNewPatientForm({
-        name: '', phone: '', unidade: !isAdmin && userUnidade !== 'all' ? userUnidade : 'Santo André', procedimento: 'Avaliação Geral', promotor: 'Passante de Rua', notas_internas: '', valor_venda: ''
+        name: '',
+        phone: '',
+        unidade: !isAdmin && userUnidade !== 'all' ? userUnidade : 'Santo André',
+        procedimento: 'Avaliação Geral',
+        promotor: 'Passante de Rua',
+        notas_internas: '',
+        valor_venda: ''
       });
       fetchLeads();
     }
@@ -305,15 +315,14 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     });
   }, [leads, targetUnidade]);
 
-  // ORQUESTRA: Ignoramos a ultima_interacao aqui. O Kanban mostra apenas ações de CRM.
   const leadsVisiveisKanban = useMemo(() => {
     return leadsNaUnidadeGlobal.filter((lead) => {
       if (dateRange === 'all') return true;
+      const interacao = isWithinDateRange(lead.ultima_interacao || lead['última_interação'], dateRange, customStart, customEnd);
       const criacao = isWithinDateRange(lead.created_at, dateRange, customStart, customEnd);
       const agendamento = isWithinDateRange(lead.data_agendamento, dateRange, customStart, customEnd);
       const venda = isWithinDateRange(lead.data_venda, dateRange, customStart, customEnd);
-      const movimentacao = isWithinDateRange(lead.data_movimentacao, dateRange, customStart, customEnd);
-      return criacao || agendamento || venda || movimentacao;
+      return interacao || criacao || agendamento || venda;
     });
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
@@ -325,36 +334,107 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     });
   }, [leadsVisiveisKanban, searchTerm]);
 
-  const funilLeadsPeriodo = leadsVisiveisKanban;
-  const totalLeads = funilLeadsPeriodo.length;
-  const totalEstagnados = useMemo(() => funilLeadsPeriodo.filter(l => getHorasParado(l) >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(l.status)).length, [funilLeadsPeriodo]);
-
-  // MÉTRICAS DIRETAS (Para os números em destaque no Banner baterem com a coluna)
-  const agendados = useMemo(() => funilLeadsPeriodo.filter(l => l.status === 'agendado').length, [funilLeadsPeriodo]);
-  const confirmados = useMemo(() => funilLeadsPeriodo.filter(l => l.status === 'confirmado').length, [funilLeadsPeriodo]);
-  const compareceram = useMemo(() => funilLeadsPeriodo.filter(l => l.status === 'na_clinica').length, [funilLeadsPeriodo]);
-  const vendidos = useMemo(() => funilLeadsPeriodo.filter(l => l.status === 'vendido').length, [funilLeadsPeriodo]);
-
-  // TAXAS DE CONVERSÃO (Acumuladas, para os badges de % fazerem sentido matematicamente)
-  const acumuladoAgendados = useMemo(() => funilLeadsPeriodo.filter(l => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
-  const acumuladoConfirmados = useMemo(() => funilLeadsPeriodo.filter(l => ['confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
-  const acumuladoCompareceram = useMemo(() => funilLeadsPeriodo.filter(l => ['na_clinica', 'vendido', 'nao_vendido'].includes(l.status)).length, [funilLeadsPeriodo]);
-
-  const vendasRealizadas = useMemo(() => {
-    return leadsNaUnidadeGlobal.filter(l => l.status === 'vendido' && isWithinDateRange(l.data_venda || l.data_movimentacao || l.created_at, dateRange, customStart, customEnd));
+  const funilLeadsPeriodo = useMemo(() => {
+    return leadsNaUnidadeGlobal.filter((lead) => {
+      if (dateRange === 'all') return true;
+      const interacao = isWithinDateRange(lead.ultima_interacao || lead['última_interação'], dateRange, customStart, customEnd);
+      const criacao = isWithinDateRange(lead.created_at, dateRange, customStart, customEnd);
+      const agendamento = isWithinDateRange(lead.data_agendamento, dateRange, customStart, customEnd);
+      const venda = isWithinDateRange(lead.data_venda, dateRange, customStart, customEnd);
+      return interacao || criacao || agendamento || venda;
+    });
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
+  const totalLeads = funilLeadsPeriodo.length;
+  const totalEstagnados = useMemo(() => funilLeadsPeriodo.filter(l => getHorasParado(l) >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(l.status)).length, [funilLeadsPeriodo]);
+  const agendados = useMemo(() => funilLeadsPeriodo.filter(l => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
+  const confirmados = useMemo(() => funilLeadsPeriodo.filter(l => ['confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
+  const compareceram = useMemo(() => funilLeadsPeriodo.filter(l => ['na_clinica', 'vendido', 'nao_vendido'].includes(l.status)).length, [funilLeadsPeriodo]);
+
+  const vendasRealizadas = useMemo(() => {
+    return leadsNaUnidadeGlobal.filter(l => l.status === 'vendido' && isWithinDateRange(l.data_venda || l.created_at || l.ultima_interacao, dateRange, customStart, customEnd));
+  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
+
+  const vendidos = vendasRealizadas.length;
   const faturamentoTotal = useMemo(() => vendasRealizadas.reduce((acc, l) => acc + (Number(l.valor_venda) || 0), 0), [vendasRealizadas]);
 
-  const taxaAgendamento = totalLeads > 0 ? ((acumuladoAgendados / totalLeads) * 100).toFixed(1) : '0.0';
-  const taxaConfirmacao = acumuladoAgendados > 0 ? ((acumuladoConfirmados / acumuladoAgendados) * 100).toFixed(1) : '0.0';
-  const taxaComparecimento = acumuladoConfirmados > 0 ? ((acumuladoCompareceram / acumuladoConfirmados) * 100).toFixed(1) : '0.0';
-  const taxaFechamento = acumuladoCompareceram > 0 ? ((vendidos / acumuladoCompareceram) * 100).toFixed(1) : '0.0';
+  const taxaAgendamento = totalLeads > 0 ? ((agendados / totalLeads) * 100).toFixed(1) : '0.0';
+  const taxaConfirmacao = agendados > 0 ? ((confirmados / agendados) * 100).toFixed(1) : '0.0';
+  const taxaComparecimento = confirmados > 0 ? ((compareceram / confirmados) * 100).toFixed(1) : '0.0';
+  const taxaFechamento = compareceram > 0 ? ((vendidos / compareceram) * 100).toFixed(1) : '0.0';
+
+  const getGoogleCalendarUrl = () => {
+    const baseUrl = "https://calendar.google.com/calendar/embed?ctz=America%2FSao_Paulo&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=1&showTz=0&mode=WEEK";
+    if (targetUnidade !== 'all' && targetUnidade !== 'Todas' && GOOGLE_CALENDARS[targetUnidade]) {
+      const cal = GOOGLE_CALENDARS[targetUnidade];
+      return `${baseUrl}&src=${cal.id}&color=${cal.color}`;
+    }
+    const allSources = Object.values(GOOGLE_CALENDARS).map(cal => `&src=${cal.id}&color=${cal.color}`).join('');
+    return `${baseUrl}${allSources}`;
+  };
 
   const procedimentoAtual = leadDrawer?.procedimento || 'Não Informado';
   const opcoesProcedimento = OPCOES_PROCEDIMENTO_PADRAO.includes(procedimentoAtual) ? OPCOES_PROCEDIMENTO_PADRAO : [procedimentoAtual, ...OPCOES_PROCEDIMENTO_PADRAO];
   const feedbackAtual = leadDrawer?.feedback || 'Não Informado';
   const opcoesFeedback = OPCOES_FEEDBACK_PADRAO.includes(feedbackAtual) ? OPCOES_FEEDBACK_PADRAO : [feedbackAtual, ...OPCOES_FEEDBACK_PADRAO];
+
+  const procsCount = useMemo(() => {
+    const counts: Record<string, number> = {};
+    funilLeadsPeriodo.forEach(l => {
+      const p = l.procedimento || 'Não Informado';
+      counts[p] = (counts[p] || 0) + 1;
+    });
+    return counts;
+  }, [funilLeadsPeriodo]);
+
+  const chartBuckets = useMemo(() => {
+    const now = new Date();
+    const buckets: { label: string; total: number; agendados: number }[] = [];
+    if (dateRange === 'today') {
+      const horas = [8, 10, 12, 14, 16, 18, 20];
+      horas.forEach((h) => {
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h - 2, 0, 0).getTime();
+        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, 0, 0).getTime();
+        const label = `${h.toString().padStart(2, '0')}:00`;
+        const leadsNoIntervalo = leadsNaUnidadeGlobal.filter((l) => {
+          const t = getTempoCronologicoKanban(l);
+          return t >= start && t < end;
+        });
+        const agendadosNoIntervalo = leadsNoIntervalo.filter((l) => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status));
+        buckets.push({ label, total: leadsNoIntervalo.length, agendados: agendadosNoIntervalo.length });
+      });
+    } else {
+      const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(now.getDate() - i);
+        const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).getTime();
+        const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).getTime();
+        const label = i === 0 ? 'Hoje' : `${diasSemana[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
+        const leadsNoDia = leadsNaUnidadeGlobal.filter((l) => {
+          const t = getTempoCronologicoKanban(l);
+          return t >= start && t <= end;
+        });
+        const agendadosNoDia = leadsNoDia.filter((l) => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status));
+        buckets.push({ label, total: leadsNoDia.length, agendados: agendadosNoDia.length });
+      }
+    }
+    return buckets;
+  }, [dateRange, leadsNaUnidadeGlobal]);
+
+  const svgWidth = 600, svgHeight = 200, paddingX = 40, paddingY = 30;
+  const plotWidth = svgWidth - paddingX * 2, plotHeight = svgHeight - paddingY * 2;
+  const maxVal = useMemo(() => Math.max(...chartBuckets.map((b) => b.total), 5), [chartBuckets]);
+  
+  const pointsTotal = useMemo(() => chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / (chartBuckets.length - 1)), y: paddingY + plotHeight - (b.total / maxVal) * plotHeight, val: b.total })), [chartBuckets, maxVal]);
+  const pointsAgendados = useMemo(() => chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / (chartBuckets.length - 1)), y: paddingY + plotHeight - (b.agendados / maxVal) * plotHeight, val: b.agendados })), [chartBuckets, maxVal]);
+  
+  const generateLinePath = (pts: { x: number; y: number }[]) => pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+  const generateAreaPath = (pts: { x: number; y: number }[]) => {
+    const line = generateLinePath(pts);
+    const lastX = pts[pts.length - 1].x.toFixed(1), firstX = pts[0].x.toFixed(1), bottomY = (paddingY + plotHeight).toFixed(1);
+    return `${line} L ${lastX} ${bottomY} L ${firstX} ${bottomY} Z`;
+  };
 
   if (!isBrowser) return null;
 
@@ -423,9 +503,9 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   onChange={(e) => setDateRange(e.target.value)} 
                   className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium outline-none focus:border-blue-500 cursor-pointer"
                 >
+                  <option value="this_month">Este Mês</option>
                   <option value="today">Hoje</option>
                   <option value="yesterday">Ontem</option>
-                  <option value="this_month">Este Mês</option>
                   <option value="last_7">Últimos 7 dias</option>
                   <option value="all">Todo o Período</option>
                   <option value="custom">Personalizado</option>
@@ -559,6 +639,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
             <DragDropContext onDragEnd={handleDragEnd}>
               <div className="flex gap-6 h-full items-start">
                 {COLUNAS.map((coluna) => {
+                  // ORQUESTRA: A ordenação visual do kanban também usa a nova lógica
                   const leadsDaColuna = leadsFiltrados.filter((l) => (l.status || 'novo') === coluna.id).sort((a, b) => getTempoCronologicoKanban(b) - getTempoCronologicoKanban(a));
                   return (
                     <Droppable droppableId={coluna.id} key={coluna.id}>
@@ -660,6 +741,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
         {/* RESTANTE DO CÓDIGO (ANALYTICS, MODALS, DRAWERS) PERMANECE IGUAL */}
         {activeTab === 'analytics' && (
            <div className="flex-1 flex items-center justify-center p-6 text-slate-500">
+             {/* Mantive omitido aqui para focar no Kanban, mas no seu arquivo original, mantenha o seu bloco de Analytics intacto */}
              Analytics está no seu arquivo original.
            </div>
         )}
