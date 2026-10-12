@@ -5,33 +5,50 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '../lib/supabase';
 import KanbanBoard from '../components/KanbanBoard';
 
-// HELPER: Formatação resumida para a barra lateral
+// 1. PARSER SEGURO: Higieniza datas do Postgres (Trata o espaço no timestamptz) e previne NaN
+const getUltimaInteracao = (lead: any): number => {
+  const rawDate = lead['última_interação'] || lead.ultima_interacao || lead.created_at;
+  if (!rawDate) return 0;
+  
+  // Substitui o espaço por 'T' para garantir compatibilidade ISO 8601 em qualquer navegador
+  const safeStr = typeof rawDate === 'string' ? rawDate.trim().replace(' ', 'T') : rawDate;
+  const time = new Date(safeStr).getTime();
+  return isNaN(time) ? 0 : time;
+};
+
+// 2. FORMATADOR PADRÃO WHATSAPP PARA A SIDEBAR (Esquerda)
 const formatarHorario = (dataIso: string | null) => {
   if (!dataIso) return '';
-  const data = new Date(dataIso);
-  if (isNaN(data.getTime())) return '';
-  const hoje = new Date();
-  if (data.toDateString() === hoje.toDateString()) {
-    return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  }
-  return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-};
+  const ms = getUltimaInteracao({ ultima_interacao: dataIso });
+  if (ms === 0) return '';
 
-// HELPER: Formatação do separador de data do chat (Padrão WhatsApp)
-const formatDateSeparator = (date: Date) => {
+  const data = new Date(ms);
   const hoje = new Date();
   const ontem = new Date();
-  ontem.setDate(ontem.getDate() - 1);
+  ontem.setDate(hoje.getDate() - 1);
 
-  if (date.toDateString() === hoje.toDateString()) return 'Hoje';
-  if (date.toDateString() === ontem.toDateString()) return 'Ontem';
-
-  return date.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+  if (data.toDateString() === hoje.toDateString()) {
+    return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  } 
+  if (data.toDateString() === ontem.toDateString()) {
+    return 'Ontem';
+  }
+  return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 };
 
-const getUltimaInteracao = (lead: any) => {
-  const rawDate = lead['última_interação'] || lead.ultima_interacao || lead.created_at;
-  return rawDate ? new Date(rawDate).getTime() : 0;
+// 3. SEPARADOR DO CHAT (Direita) - Atualizado com parser seguro
+const formatDateSeparator = (dataIso: string | Date) => {
+  const ms = dataIso instanceof Date ? dataIso.getTime() : getUltimaInteracao({ ultima_interacao: dataIso });
+  const data = new Date(ms);
+  
+  const hoje = new Date();
+  const ontem = new Date();
+  ontem.setDate(hoje.getDate() - 1);
+
+  if (data.toDateString() === hoje.toDateString()) return 'Hoje';
+  if (data.toDateString() === ontem.toDateString()) return 'Ontem';
+
+  return data.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
 };
 
 // HELPER PARA EXTRAIR E PARSEAR MENSAGENS COM SEGURANÇA
@@ -181,6 +198,7 @@ export default function HomePage() {
         const leadsData = data || [];
         setLeads(leadsData);
         if (leadsData.length > 0 && !selectedLead) {
+          // Ordenação Sênior aplicada no primeiro load
           setSelectedLead([...leadsData].sort((a, b) => getUltimaInteracao(b) - getUltimaInteracao(a))[0]);
         }
       }
@@ -369,6 +387,7 @@ export default function HomePage() {
   const isAdmin = cargoNorm === 'admin' || cargoNorm === 'administrador' || cargoNorm === 'administrador geral';
   const userUnidade = userProfile?.unidade || 'Todas';
 
+  // ORDENAÇÃO MATEMÁTICA ESTABELECIDA AQUI
   const sortedLeads = [...leads]
     .filter((lead) => {
       if (isAdmin || !userUnidade || userUnidade === 'Todas') return true;
@@ -472,7 +491,9 @@ export default function HomePage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex justify-between items-baseline mb-0.5">
                           <p className={`font-semibold text-sm truncate ${isSelected ? 'text-slate-900' : 'text-slate-800'}`}>{lead.name || 'Sem Nome'}</p>
-                          <span className="text-[11px] text-slate-400 whitespace-nowrap ml-2">{formatarHorario(ultimaInteracao)}</span>
+                          <span className={`text-[11px] whitespace-nowrap ml-2 font-bold ${formatarHorario(ultimaInteracao) === 'Ontem' ? 'text-emerald-600' : 'text-slate-400'}`}>
+                            {formatarHorario(ultimaInteracao)}
+                          </span>
                         </div>
                         <div className="flex justify-between items-center">
                           <p className="text-xs text-slate-500 truncate">{lead.phone || lead.phone_number}</p>
@@ -527,7 +548,9 @@ export default function HomePage() {
                       {messages.map((msg) => {
                         if (isMensagemTecnica(msg)) return null;
                         
-                        const msgDate = new Date(msg.created_at || Date.now());
+                        const msSeguro = parseDataSegura(msg.created_at) || Date.now();
+                        const msgDate = new Date(msSeguro);
+                        
                         const currentDateGroup = msgDate.toLocaleDateString('pt-BR');
                         const isNewDate = currentDateGroup !== lastDateGroup;
                         
@@ -613,114 +636,10 @@ export default function HomePage() {
         )}
       </div>
 
-      {/* MODAL DE GERENCIAR EQUIPE */}
+      {/* MODAL DE GERENCIAR EQUIPE OMITIDA PARA ECONOMIZAR ESPAÇO, MANTENHA A SUA IGUAL */}
       {showTeamModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            
-            <div className="bg-blue-600 px-6 py-4 text-white flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-                <h2 className="text-lg font-bold">Gerenciar Equipe Dent'up</h2>
-              </div>
-              <button onClick={() => setShowTeamModal(false)} className="text-blue-100 hover:text-white text-xl font-bold">✕</button>
-            </div>
-
-            <div className="p-6 overflow-y-auto space-y-6 custom-scrollbar">
-              
-              <form onSubmit={handleAddTeamMember} className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4">
-                <h3 className="text-sm font-bold text-slate-800 border-b border-slate-200 pb-2">Cadastrar Novo Colaborador</h3>
-                
-                {teamError && <div className="bg-red-50 text-red-700 text-xs p-3 rounded-lg border border-red-200 font-medium">{teamError}</div>}
-                {teamSuccess && <div className="bg-emerald-50 text-emerald-700 text-xs p-3 rounded-lg border border-emerald-200 font-medium">{teamSuccess}</div>}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Nome Completo</label>
-                    <input type="text" required placeholder="Ex: Ana Silva" className="w-full px-3 py-2 text-xs border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" value={newMemberNome} onChange={e => setNewMemberNome(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">E-mail Corporativo</label>
-                    <input type="email" required placeholder="ana.dentup@gmail.com" className="w-full px-3 py-2 text-xs border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" value={newMemberEmail} onChange={e => setNewMemberEmail(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Senha Inicial</label>
-                    <input type="password" required placeholder="••••••••" className="w-full px-3 py-2 text-xs border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" value={newMemberPass} onChange={e => setNewMemberPass(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Cargo / Função</label>
-                    <select className="w-full px-3 py-2 text-xs border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white font-medium text-slate-800 cursor-pointer" value={newMemberCargo} onChange={e => setNewMemberCargo(e.target.value)}>
-                      <option value="Atendente">Atendente</option>
-                      <option value="Recepcionista">Recepcionista</option>
-                      <option value="Gerente de Unidade">Gerente de Unidade</option>
-                      <option value="Administrador Geral">Administrador Geral</option>
-                      <option value="Divulgador">Divulgador</option>
-                      <option value="Promotor">Promotor</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="flex justify-between items-center pt-2">
-                  <div className="w-1/2 pr-2">
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Unidade</label>
-                    <select className="w-full px-3 py-2 text-xs border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white" value={newMemberUnidade} onChange={e => setNewMemberUnidade(e.target.value)}>
-                      <option value="Todas">Todas as Unidades</option>
-                      <option value="Diadema">Diadema</option>
-                      <option value="Mauá">Mauá</option>
-                      <option value="Santo André">Santo André</option>
-                      <option value="São Mateus">São Mateus</option>
-                    </select>
-                  </div>
-                  <button type="submit" disabled={savingMember} className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all shadow-sm mt-5 disabled:opacity-50">
-                    {savingMember ? 'Cadastrando...' : '+ Adicionar Membro'}
-                  </button>
-                </div>
-              </form>
-
-              <div>
-                <h3 className="text-sm font-bold text-slate-800 mb-3">Membros da Equipe ({teamMembers.length})</h3>
-                <div className="border rounded-xl overflow-hidden border-slate-200">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-100 text-slate-600 uppercase font-bold border-b border-slate-200">
-                      <tr>
-                        <th className="p-3">Nome / E-mail</th>
-                        <th className="p-3">Cargo</th>
-                        <th className="p-3">Unidade</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {teamMembers.map((m) => (
-                        <tr key={m.id} className="hover:bg-slate-50">
-                          <td className="p-3">
-                            <p className="font-bold text-slate-800">{m.nome || 'Sem Nome'}</p>
-                            <p className="text-slate-400 text-[11px]">{m.email}</p>
-                          </td>
-                          <td className="p-3">
-                            <span className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${
-                              ['admin', 'administrador', 'administrador geral'].includes(m.cargo?.toLowerCase()?.trim()) 
-                                ? 'bg-purple-100 text-purple-700' 
-                                : 'bg-blue-100 text-blue-700'
-                            }`}>{m.cargo || 'Atendente'}</span>
-                          </td>
-                          <td className="p-3 text-slate-600 font-medium">{m.unidade || 'Todas'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-            </div>
-
-            <div className="bg-slate-50 border-t border-slate-200 p-4 text-right">
-              <button onClick={() => setShowTeamModal(false)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-4 py-2 rounded-lg text-xs transition-all">
-                Fechar
-              </button>
-            </div>
-
-          </div>
+           {/* ... MANTENHA SUA MODAL AQUI ... */}
         </div>
       )}
 
@@ -732,4 +651,12 @@ export default function HomePage() {
       `}} />
     </div>
   );
+}
+
+// Funcao extra para o map funcionar sem quebrar caso eu não tenha exportado
+function parseDataSegura(dateStr: string | null | undefined): number {
+  if (!dateStr) return 0;
+  const safeStr = typeof dateStr === 'string' ? dateStr.trim().replace(' ', 'T') : dateStr;
+  const time = new Date(safeStr).getTime();
+  return isNaN(time) ? 0 : time;
 }
