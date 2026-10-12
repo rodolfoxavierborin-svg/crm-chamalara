@@ -4,12 +4,27 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
-// 1. PARSER SEGURO GLOBAL: A mesma vacina usada no Chat para prevenir NaN
+// 1. PARSER SEGURO GLOBAL
 const parseDataSegura = (dateStr: string | null | undefined): number => {
   if (!dateStr) return 0;
   const safeStr = typeof dateStr === 'string' ? dateStr.trim().replace(' ', 'T') : dateStr;
   const time = new Date(safeStr).getTime();
   return isNaN(time) ? 0 : time;
+};
+
+// 2. PARSER DE FUSO HORÁRIO (Trava a data no fuso local do navegador/Brasil, evitando o bug do UTC)
+const getLocalDateString = (dateStr: string | null | undefined): string => {
+  if (!dateStr) return '';
+  const trimmed = dateStr.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed; // Já é YYYY-MM-DD
+  
+  const d = new Date(trimmed.replace(' ', 'T'));
+  if (isNaN(d.getTime())) return '';
+  
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 const COLUNAS = [
@@ -44,7 +59,6 @@ const OPCOES_FEEDBACK_PADRAO = [
   'SEM INTERESSE', 'VOU FALAR COM A FAMILIA', 'SEM DINHEIRO'
 ];
 
-// ORQUESTRA: Motor de tempo EXCLUSIVO para o Kanban usando Parser Seguro
 const getTempoCronologicoKanban = (lead: any) => {
   const timeMovimentacao = parseDataSegura(lead.data_movimentacao);
   if (timeMovimentacao > 0) return timeMovimentacao;
@@ -122,54 +136,50 @@ const formatarMoeda = (val?: number | string | null): string => {
   return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
+// 3. FILTRO DE DATA BLINDADO (Compara apenas AAAA-MM-DD local)
 const isWithinDateRange = (dateStr: string | null, range: string, customStart?: string, customEnd?: string) => {
   if (range === 'all') return true;
-  
-  // CORREÇÃO CRÍTICA: Cliente que chegou "Hoje" não estava aparecendo por conta do erro de parse (NaN)
-  const leadTime = parseDataSegura(dateStr);
-  if (leadTime === 0) return false;
+  if (!dateStr) return false;
+
+  const leadDate = getLocalDateString(dateStr);
+  if (!leadDate) return false;
 
   const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
-  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-  if (range === 'today') return leadTime >= todayStart && leadTime <= todayEnd;
+  if (range === 'today') return leadDate === todayStr;
 
   if (range === 'yesterday') {
-    const yStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0).getTime();
-    const yEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999).getTime();
-    return leadTime >= yStart && leadTime <= yEnd;
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+    return leadDate === yesterdayStr;
   }
 
   if (range === 'last_7') {
-    const sevenDaysAgoStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0, 0).getTime();
-    return leadTime >= sevenDaysAgoStart && leadTime <= todayEnd;
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(now.getDate() - 6);
+    const sevenDaysAgoStr = getLocalDateString(sevenDaysAgo.toISOString());
+    return leadDate >= sevenDaysAgoStr && leadDate <= todayStr;
   }
 
   if (range === 'last_30') {
-    const thirtyDaysAgoStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29, 0, 0, 0, 0).getTime();
-    return leadTime >= thirtyDaysAgoStart && leadTime <= todayEnd;
+    const thirtyDaysAgo = new Date(now);
+    thirtyDaysAgo.setDate(now.getDate() - 29);
+    const thirtyDaysAgoStr = getLocalDateString(thirtyDaysAgo.toISOString());
+    return leadDate >= thirtyDaysAgoStr && leadDate <= todayStr;
   }
 
   if (range === 'this_month') {
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
-    return leadTime >= monthStart && leadTime <= monthEnd;
+    const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    return leadDate.startsWith(currentMonthPrefix);
   }
 
   if (range === 'custom') {
-    let startValid = true, endValid = true;
-    if (customStart) {
-      const [y, m, d] = customStart.split('-').map(Number);
-      const s = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
-      startValid = leadTime >= s;
-    }
-    if (customEnd) {
-      const [y, m, d] = customEnd.split('-').map(Number);
-      const e = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
-      endValid = leadTime <= e;
-    }
-    return startValid && endValid;
+    let valid = true;
+    if (customStart) valid = valid && leadDate >= customStart;
+    if (customEnd) valid = valid && leadDate <= customEnd;
+    return valid;
   }
 
   return true;
@@ -268,7 +278,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       status: 'novo',
       is_paused: true,
       created_at: new Date().toISOString(),
-      data_movimentacao: new Date().toISOString() // Orquestra: Força a data de criação no painel também
+      data_movimentacao: new Date().toISOString()
     };
 
     const { error } = await supabase.from('dentup_leads').insert([payload]).select();
@@ -295,15 +305,15 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     });
   }, [leads, targetUnidade]);
 
+  // ORQUESTRA: Ignoramos a ultima_interacao aqui. O Kanban mostra apenas ações de CRM.
   const leadsVisiveisKanban = useMemo(() => {
     return leadsNaUnidadeGlobal.filter((lead) => {
       if (dateRange === 'all') return true;
-      const interacao = isWithinDateRange(lead.ultima_interacao || lead['última_interação'], dateRange, customStart, customEnd);
       const criacao = isWithinDateRange(lead.created_at, dateRange, customStart, customEnd);
       const agendamento = isWithinDateRange(lead.data_agendamento, dateRange, customStart, customEnd);
       const venda = isWithinDateRange(lead.data_venda, dateRange, customStart, customEnd);
       const movimentacao = isWithinDateRange(lead.data_movimentacao, dateRange, customStart, customEnd);
-      return interacao || criacao || agendamento || venda || movimentacao;
+      return criacao || agendamento || venda || movimentacao;
     });
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
@@ -316,24 +326,30 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   }, [leadsVisiveisKanban, searchTerm]);
 
   const funilLeadsPeriodo = leadsVisiveisKanban;
-  
   const totalLeads = funilLeadsPeriodo.length;
   const totalEstagnados = useMemo(() => funilLeadsPeriodo.filter(l => getHorasParado(l) >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(l.status)).length, [funilLeadsPeriodo]);
-  const agendados = useMemo(() => funilLeadsPeriodo.filter(l => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
-  const confirmados = useMemo(() => funilLeadsPeriodo.filter(l => ['confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
-  const compareceram = useMemo(() => funilLeadsPeriodo.filter(l => ['na_clinica', 'vendido', 'nao_vendido'].includes(l.status)).length, [funilLeadsPeriodo]);
+
+  // MÉTRICAS DIRETAS (Para os números em destaque no Banner baterem com a coluna)
+  const agendados = useMemo(() => funilLeadsPeriodo.filter(l => l.status === 'agendado').length, [funilLeadsPeriodo]);
+  const confirmados = useMemo(() => funilLeadsPeriodo.filter(l => l.status === 'confirmado').length, [funilLeadsPeriodo]);
+  const compareceram = useMemo(() => funilLeadsPeriodo.filter(l => l.status === 'na_clinica').length, [funilLeadsPeriodo]);
+  const vendidos = useMemo(() => funilLeadsPeriodo.filter(l => l.status === 'vendido').length, [funilLeadsPeriodo]);
+
+  // TAXAS DE CONVERSÃO (Acumuladas, para os badges de % fazerem sentido matematicamente)
+  const acumuladoAgendados = useMemo(() => funilLeadsPeriodo.filter(l => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
+  const acumuladoConfirmados = useMemo(() => funilLeadsPeriodo.filter(l => ['confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
+  const acumuladoCompareceram = useMemo(() => funilLeadsPeriodo.filter(l => ['na_clinica', 'vendido', 'nao_vendido'].includes(l.status)).length, [funilLeadsPeriodo]);
 
   const vendasRealizadas = useMemo(() => {
-    return leadsNaUnidadeGlobal.filter(l => l.status === 'vendido' && isWithinDateRange(l.data_venda || l.created_at || l.ultima_interacao, dateRange, customStart, customEnd));
+    return leadsNaUnidadeGlobal.filter(l => l.status === 'vendido' && isWithinDateRange(l.data_venda || l.data_movimentacao || l.created_at, dateRange, customStart, customEnd));
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
-  const vendidos = vendasRealizadas.length;
   const faturamentoTotal = useMemo(() => vendasRealizadas.reduce((acc, l) => acc + (Number(l.valor_venda) || 0), 0), [vendasRealizadas]);
 
-  const taxaAgendamento = totalLeads > 0 ? ((agendados / totalLeads) * 100).toFixed(1) : '0.0';
-  const taxaConfirmacao = agendados > 0 ? ((confirmados / agendados) * 100).toFixed(1) : '0.0';
-  const taxaComparecimento = confirmados > 0 ? ((compareceram / confirmados) * 100).toFixed(1) : '0.0';
-  const taxaFechamento = compareceram > 0 ? ((vendidos / compareceram) * 100).toFixed(1) : '0.0';
+  const taxaAgendamento = totalLeads > 0 ? ((acumuladoAgendados / totalLeads) * 100).toFixed(1) : '0.0';
+  const taxaConfirmacao = acumuladoAgendados > 0 ? ((acumuladoConfirmados / acumuladoAgendados) * 100).toFixed(1) : '0.0';
+  const taxaComparecimento = acumuladoConfirmados > 0 ? ((acumuladoCompareceram / acumuladoConfirmados) * 100).toFixed(1) : '0.0';
+  const taxaFechamento = acumuladoCompareceram > 0 ? ((vendidos / acumuladoCompareceram) * 100).toFixed(1) : '0.0';
 
   const procedimentoAtual = leadDrawer?.procedimento || 'Não Informado';
   const opcoesProcedimento = OPCOES_PROCEDIMENTO_PADRAO.includes(procedimentoAtual) ? OPCOES_PROCEDIMENTO_PADRAO : [procedimentoAtual, ...OPCOES_PROCEDIMENTO_PADRAO];
