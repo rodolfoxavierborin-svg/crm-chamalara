@@ -5,18 +5,20 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '../lib/supabase';
 import KanbanBoard from '../components/KanbanBoard';
 
-// 1. PARSER SEGURO: Higieniza datas do Postgres (Trata o espaço no timestamptz) e previne NaN
-const getUltimaInteracao = (lead: any): number => {
-  const rawDate = lead['última_interação'] || lead.ultima_interacao || lead.created_at;
-  if (!rawDate) return 0;
-  
-  // Substitui o espaço por 'T' para garantir compatibilidade ISO 8601 em qualquer navegador
-  const safeStr = typeof rawDate === 'string' ? rawDate.trim().replace(' ', 'T') : rawDate;
+// 1. PARSER SEGURO GLOBAL: Trata datas do Postgres para Safari/Chrome sem dar NaN
+const parseDataSegura = (dateStr: string | null | undefined): number => {
+  if (!dateStr) return 0;
+  const safeStr = typeof dateStr === 'string' ? dateStr.trim().replace(' ', 'T') : dateStr;
   const time = new Date(safeStr).getTime();
   return isNaN(time) ? 0 : time;
 };
 
-// 2. FORMATADOR PADRÃO WHATSAPP PARA A SIDEBAR (Esquerda)
+const getUltimaInteracao = (lead: any): number => {
+  const rawDate = lead['última_interação'] || lead.ultima_interacao || lead.created_at;
+  return parseDataSegura(rawDate);
+};
+
+// 2. FORMATADOR PADRÃO WHATSAPP
 const formatarHorario = (dataIso: string | null) => {
   if (!dataIso) return '';
   const ms = getUltimaInteracao({ ultima_interacao: dataIso });
@@ -36,7 +38,7 @@ const formatarHorario = (dataIso: string | null) => {
   return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 };
 
-// 3. SEPARADOR DO CHAT (Direita) - Atualizado com parser seguro
+// 3. SEPARADOR DO CHAT
 const formatDateSeparator = (dataIso: string | Date) => {
   const ms = dataIso instanceof Date ? dataIso.getTime() : getUltimaInteracao({ ultima_interacao: dataIso });
   const data = new Date(ms);
@@ -51,18 +53,14 @@ const formatDateSeparator = (dataIso: string | Date) => {
   return data.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
 };
 
-// HELPER PARA EXTRAIR E PARSEAR MENSAGENS COM SEGURANÇA
+// HELPER PARA EXTRAIR MENSAGENS
 const parseMensagem = (msg: any) => {
   let raw = msg.message || msg;
   let type = 'human';
   let content = '';
 
   if (typeof raw === 'string') {
-    try {
-      raw = JSON.parse(raw);
-    } catch (e) {
-      content = raw;
-    }
+    try { raw = JSON.parse(raw); } catch (e) { content = raw; }
   }
 
   if (typeof raw === 'object' && raw !== null) {
@@ -98,7 +96,7 @@ export default function HomePage() {
   const [newMessage, setNewMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // ESTADOS DA MODAL DE GERENCIAR EQUIPE
+  // Estados da Modal de Equipe
   const [showTeamModal, setShowTeamModal] = useState(false);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [newMemberNome, setNewMemberNome] = useState('');
@@ -110,16 +108,13 @@ export default function HomePage() {
   const [teamError, setTeamError] = useState('');
   const [teamSuccess, setTeamSuccess] = useState('');
 
-  // 1. CHECAGEM DE AUTENTICAÇÃO E SESSÃO
   useEffect(() => {
     const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      
       if (!session) {
         router.push('/login');
         return;
       }
-
       const { data: profile } = await supabase
         .from('dentup_profiles')
         .select('*')
@@ -129,56 +124,37 @@ export default function HomePage() {
       setUserProfile(profile || { nome: session.user.email, cargo: 'Administrador Geral', unidade: 'Todas' });
       setLoadingAuth(false);
     };
-
     checkUser();
   }, [router]);
 
-  // BUSCA LISTA DE EQUIPE QUANDO ABRE A MODAL
   const fetchTeamMembers = async () => {
     const { data, error } = await supabase.from('dentup_profiles').select('*').order('nome', { ascending: true });
     if (!error) setTeamMembers(data || []);
   };
 
   useEffect(() => {
-    if (showTeamModal) {
-      fetchTeamMembers();
-    }
+    if (showTeamModal) fetchTeamMembers();
   }, [showTeamModal]);
 
-  // CADASTRAR NOVO MEMBRO VIA API
   const handleAddTeamMember = async (e: React.FormEvent) => {
+    // Seu código original de handleAddTeamMember continua idêntico aqui
     e.preventDefault();
     setTeamError('');
     setTeamSuccess('');
     setSavingMember(true);
-
     try {
       const { data: { session } } = await supabase.auth.getSession();
-
       const res = await fetch('/api/admin/create-user', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token || ''}`
-        },
-        body: JSON.stringify({
-          nome: newMemberNome,
-          email: newMemberEmail,
-          password: newMemberPass,
-          cargo: newMemberCargo,
-          unidade: newMemberUnidade,
-        }),
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token || ''}` },
+        body: JSON.stringify({ nome: newMemberNome, email: newMemberEmail, password: newMemberPass, cargo: newMemberCargo, unidade: newMemberUnidade }),
       });
-
       const result = await res.json();
-
       if (!res.ok || result.error) {
         setTeamError(result.error || 'Erro ao cadastrar usuário.');
       } else {
         setTeamSuccess('Usuário cadastrado com sucesso!');
-        setNewMemberNome('');
-        setNewMemberEmail('');
-        setNewMemberPass('');
+        setNewMemberNome(''); setNewMemberEmail(''); setNewMemberPass('');
         fetchTeamMembers();
       }
     } catch (err: any) {
@@ -188,7 +164,7 @@ export default function HomePage() {
     }
   };
 
-  // 2. BUSCA DE LEADS E ESCUTA EM TEMPO REAL GLOBAL
+  // 2. ORQUESTRA DO CHAT: Busca e escuta de leads blindada contra o Kanban
   useEffect(() => {
     if (loadingAuth) return;
 
@@ -198,7 +174,6 @@ export default function HomePage() {
         const leadsData = data || [];
         setLeads(leadsData);
         if (leadsData.length > 0 && !selectedLead) {
-          // Ordenação Sênior aplicada no primeiro load
           setSelectedLead([...leadsData].sort((a, b) => getUltimaInteracao(b) - getUltimaInteracao(a))[0]);
         }
       }
@@ -210,12 +185,25 @@ export default function HomePage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_leads' }, (payload: any) => {
         const newLead = payload.new as any;
         if (!newLead || !newLead.id) return;
-        setLeads((curr: any[]) =>
-          curr.find((l) => l.id === newLead.id)
-            ? curr.map((l) => (l.id === newLead.id ? newLead : l))
-            : [...curr, newLead]
-        );
-        setSelectedLead((prev: any) => (prev?.id === newLead.id ? newLead : prev));
+        
+        setLeads((curr) => {
+          const existingLead = curr.find((l) => l.id === newLead.id);
+          if (existingLead) {
+            // TRAVA DA ORQUESTRA: Protege a última interação do Chat!
+            // Se o drag do Kanban gerar um evento, nós preservamos a data de interação do front se ela for mais nova.
+            const localTime = getUltimaInteracao(existingLead);
+            const dbTime = getUltimaInteracao(newLead);
+            
+            if (localTime > dbTime) {
+              newLead.ultima_interacao = existingLead.ultima_interacao;
+              newLead['última_interação'] = existingLead['última_interação'];
+            }
+            return curr.map((l) => (l.id === newLead.id ? newLead : l));
+          }
+          return [...curr, newLead];
+        });
+        
+        setSelectedLead((prev: any) => (prev?.id === newLead.id ? { ...prev, ...newLead } : prev));
       })
       .subscribe();
 
@@ -224,8 +212,6 @@ export default function HomePage() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
         const newMsg = payload.new;
         if (!newMsg || !newMsg.session_id) return;
-
-        // TRAVA SÊNIOR: Ignora mensagens técnicas/automáticas de ferramentas (n8n/IA)
         if (isMensagemTecnica(newMsg)) return;
 
         const cleanPhoneFromSession = newMsg.session_id.replace('dentup_', '');
@@ -253,48 +239,32 @@ export default function HomePage() {
     };
   }, [loadingAuth]);
 
-  // 3. BUSCA E ESCUTA DE MENSAGENS EM TEMPO REAL
   useEffect(() => {
     if (!selectedLead || loadingAuth) return;
-
     const cleanPhone = (selectedLead.phone || selectedLead.phone_number || '').replace(/\D/g, '');
-    if (!cleanPhone) {
-      setMessages([]);
-      return;
-    }
+    if (!cleanPhone) { setMessages([]); return; }
 
     const targetSessionId = `dentup_${cleanPhone}`;
 
     const fetchMessages = async () => {
-      const { data, error } = await supabase
-        .from('dentup_messages')
-        .select('*')
-        .eq('session_id', targetSessionId)
-        .order('created_at', { ascending: true });
-
+      const { data, error } = await supabase.from('dentup_messages').select('*').eq('session_id', targetSessionId).order('created_at', { ascending: true });
       if (!error) setMessages(data || []);
     };
-
     fetchMessages();
 
     const messagesChannel = supabase
       .channel(`chat_messages_realtime_${cleanPhone}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'dentup_messages' },
-        (payload: any) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
           const newMsg = payload.new;
           if (newMsg && newMsg.session_id === targetSessionId) {
             setMessages((prev) => {
               if (prev.some((m) => m.id === newMsg.id)) return prev;
-
               const tempIndex = prev.findIndex((m) => m.id.toString().startsWith('temp-'));
               if (tempIndex !== -1) {
                 const updated = [...prev];
                 updated[tempIndex] = newMsg;
                 return updated;
               }
-
               return [...prev, newMsg];
             });
           }
@@ -302,16 +272,11 @@ export default function HomePage() {
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(messagesChannel);
-    };
+    return () => { supabase.removeChannel(messagesChannel); };
   }, [selectedLead?.id, selectedLead?.phone, selectedLead?.phone_number, loadingAuth]);
 
-  // SCROLL AUTOMÁTICO PARA A ÚLTIMA MENSAGEM
   useEffect(() => {
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }, 100);
+    setTimeout(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, 100);
   }, [messages]);
 
   const handleLogout = async () => {
@@ -351,15 +316,10 @@ export default function HomePage() {
         await supabase.from('dentup_leads').update({ is_paused: true }).eq('id', selectedLead.id);
       }
       const { data: insertedMessage, error } = await supabase
-        .from('dentup_messages')
-        .insert({ session_id: targetSessionId, message: { type: 'human_agent', content: messageText } })
-        .select()
-        .single();
+        .from('dentup_messages').insert({ session_id: targetSessionId, message: { type: 'human_agent', content: messageText } }).select().single();
 
       if (!error) {
-        setMessages((prev: any[]) =>
-          prev.map((msg) => (msg.id === optimisticMessage.id ? insertedMessage : msg))
-        );
+        setMessages((prev: any[]) => prev.map((msg) => (msg.id === optimisticMessage.id ? insertedMessage : msg)));
       }
 
       fetch('https://api.rodolfoxborin.com.br/webhook/crm-envio-humano', {
@@ -387,7 +347,7 @@ export default function HomePage() {
   const isAdmin = cargoNorm === 'admin' || cargoNorm === 'administrador' || cargoNorm === 'administrador geral';
   const userUnidade = userProfile?.unidade || 'Todas';
 
-  // ORDENAÇÃO MATEMÁTICA ESTABELECIDA AQUI
+  // Ordenação rígida pela data da última interação garantida
   const sortedLeads = [...leads]
     .filter((lead) => {
       if (isAdmin || !userUnidade || userUnidade === 'Todas') return true;
@@ -396,13 +356,12 @@ export default function HomePage() {
     })
     .sort((a, b) => getUltimaInteracao(b) - getUltimaInteracao(a));
 
-  // Variável de controle para agrupamento de datas no chat (resetada a cada render)
   let lastDateGroup = '';
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans notranslate" translate="no">
       
-      {/* HEADER */}
+      {/* HEADER MANTIDO INTACTO */}
       <div className="bg-white border-b border-slate-200 px-4 md:px-6 h-14 md:h-16 shrink-0 flex items-center justify-between z-20 shadow-sm">
         <div className="flex items-center gap-3">
           <img src="/logo.png" alt="Dent'up Odonto" className="h-8 md:h-10 w-auto object-contain" />
@@ -542,7 +501,7 @@ export default function HomePage() {
                     </button>
                   </div>
 
-                  {/* CONTAINER DE MENSAGENS E LINHA DO TEMPO */}
+                  {/* MENSAGENS */}
                   <div className="flex-1 overflow-y-auto p-3 md:p-4 relative z-10 custom-scrollbar">
                     <div className="flex flex-col space-y-3 pb-4">
                       {messages.map((msg) => {
@@ -554,9 +513,7 @@ export default function HomePage() {
                         const currentDateGroup = msgDate.toLocaleDateString('pt-BR');
                         const isNewDate = currentDateGroup !== lastDateGroup;
                         
-                        if (isNewDate) {
-                          lastDateGroup = currentDateGroup;
-                        }
+                        if (isNewDate) lastDateGroup = currentDateGroup;
 
                         const { type, content } = parseMensagem(msg);
                         const isPatient = type === 'human' || type === 'user';
@@ -565,7 +522,6 @@ export default function HomePage() {
 
                         return (
                           <React.Fragment key={msg.id}>
-                            {/* SEPARADOR DE DATA ESTILO WHATSAPP */}
                             {isNewDate && (
                               <div className="flex justify-center my-4 opacity-90">
                                 <span className="bg-slate-200/80 backdrop-blur-sm text-slate-600 text-[11px] font-bold px-3 py-1 rounded-lg shadow-sm uppercase tracking-wide">
@@ -586,14 +542,8 @@ export default function HomePage() {
                                     }`}>
                                       {isPatient ? 'Paciente' : isAI ? 'Lara (IA)' : 'Você (Atendente)'}
                                     </span>
-
                                     <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{texto}</p>
-
-                                    {/* HORA NO BALÃO */}
-                                    <span 
-                                      className="block text-[10px] text-right mt-1.5 text-slate-400"
-                                      title={msgDate.toLocaleString('pt-BR')}
-                                    >
+                                    <span className="block text-[10px] text-right mt-1.5 text-slate-400" title={msgDate.toLocaleString('pt-BR')}>
                                       {msgDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </span>
                                   </div>
@@ -636,10 +586,9 @@ export default function HomePage() {
         )}
       </div>
 
-      {/* MODAL DE GERENCIAR EQUIPE OMITIDA PARA ECONOMIZAR ESPAÇO, MANTENHA A SUA IGUAL */}
       {showTeamModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-           {/* ... MANTENHA SUA MODAL AQUI ... */}
+           {/* ... SEU CÓDIGO DA MODAL AQUI ... */}
         </div>
       )}
 
@@ -651,12 +600,4 @@ export default function HomePage() {
       `}} />
     </div>
   );
-}
-
-// Funcao extra para o map funcionar sem quebrar caso eu não tenha exportado
-function parseDataSegura(dateStr: string | null | undefined): number {
-  if (!dateStr) return 0;
-  const safeStr = typeof dateStr === 'string' ? dateStr.trim().replace(' ', 'T') : dateStr;
-  const time = new Date(safeStr).getTime();
-  return isNaN(time) ? 0 : time;
 }

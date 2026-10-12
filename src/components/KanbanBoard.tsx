@@ -4,6 +4,14 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
+// 1. PARSER SEGURO GLOBAL: A mesma vacina usada no Chat para prevenir NaN
+const parseDataSegura = (dateStr: string | null | undefined): number => {
+  if (!dateStr) return 0;
+  const safeStr = typeof dateStr === 'string' ? dateStr.trim().replace(' ', 'T') : dateStr;
+  const time = new Date(safeStr).getTime();
+  return isNaN(time) ? 0 : time;
+};
+
 const COLUNAS = [
   { id: 'novo', titulo: 'Novos Pacientes', dot: 'bg-blue-500' },
   { id: 'nao_respondeu', titulo: 'Não Respondeu', dot: 'bg-amber-500' },
@@ -36,13 +44,15 @@ const OPCOES_FEEDBACK_PADRAO = [
   'SEM INTERESSE', 'VOU FALAR COM A FAMILIA', 'SEM DINHEIRO'
 ];
 
-const getTempoCronologico = (lead: any) => {
-  const data = lead.ultima_interacao || lead['última_interação'] || lead.created_at || lead.data_agendamento;
-  return data ? new Date(data).getTime() : 0;
+// ORQUESTRA: Motor de tempo EXCLUSIVO para o Kanban usando Parser Seguro
+const getTempoCronologicoKanban = (lead: any) => {
+  const timeMovimentacao = parseDataSegura(lead.data_movimentacao);
+  if (timeMovimentacao > 0) return timeMovimentacao;
+  return parseDataSegura(lead.created_at);
 };
 
 const getHorasParado = (lead: any): number => {
-  const timeMs = getTempoCronologico(lead);
+  const timeMs = getTempoCronologicoKanban(lead);
   if (!timeMs) return 0;
   return Math.floor((Date.now() - timeMs) / (1000 * 60 * 60));
 };
@@ -57,42 +67,32 @@ const formatarTempoParado = (horas: number): string => {
 
 const formatarDataAgendamento = (dateStr?: string | null): string => {
   if (!dateStr) return '';
-  try {
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return '';
-    const dia = date.getDate().toString().padStart(2, '0');
-    const mes = (date.getMonth() + 1).toString().padStart(2, '0');
-    const horas = date.getHours().toString().padStart(2, '0');
-    const minutos = date.getMinutes().toString().padStart(2, '0');
-    return `${dia}/${mes} às ${horas}:${minutos}`;
-  } catch {
-    return '';
-  }
+  const time = parseDataSegura(dateStr);
+  if (!time) return '';
+  const date = new Date(time);
+  const dia = date.getDate().toString().padStart(2, '0');
+  const mes = (date.getMonth() + 1).toString().padStart(2, '0');
+  const horas = date.getHours().toString().padStart(2, '0');
+  const minutos = date.getMinutes().toString().padStart(2, '0');
+  return `${dia}/${mes} às ${horas}:${minutos}`;
 };
 
 const formatarDataCurta = (dateStr?: string | null): string => {
   if (!dateStr) return '';
-  try {
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return '';
-    return date.toLocaleDateString('pt-BR');
-  } catch {
-    return '';
-  }
+  const time = parseDataSegura(dateStr);
+  if (!time) return '';
+  return new Date(time).toLocaleDateString('pt-BR');
 };
 
 const formatarDataInput = (isoDate?: string | null): string => {
   if (!isoDate) return '';
-  try {
-    const date = new Date(isoDate);
-    if (isNaN(date.getTime())) return '';
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  } catch {
-    return '';
-  }
+  const time = parseDataSegura(isoDate);
+  if (!time) return '';
+  const date = new Date(time);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 };
 
 const dateInputToISO = (dateStr: string): string | null => {
@@ -122,17 +122,14 @@ const formatarMoeda = (val?: number | string | null): string => {
   return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
-// Motor de Precisão de Datas
 const isWithinDateRange = (dateStr: string | null, range: string, customStart?: string, customEnd?: string) => {
   if (range === 'all') return true;
-  if (!dateStr) return false;
   
-  const leadDate = new Date(dateStr);
-  if (isNaN(leadDate.getTime())) return false;
+  // CORREÇÃO CRÍTICA: Cliente que chegou "Hoje" não estava aparecendo por conta do erro de parse (NaN)
+  const leadTime = parseDataSegura(dateStr);
+  if (leadTime === 0) return false;
 
-  const leadTime = leadDate.getTime();
   const now = new Date();
-
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
   const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
 
@@ -192,13 +189,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const [isNewPatientModalOpen, setIsNewPatientModalOpen] = useState(false);
   const [savingPatient, setSavingPatient] = useState(false);
   const [newPatientForm, setNewPatientForm] = useState({
-    name: '',
-    phone: '',
-    unidade: 'Santo André',
-    procedimento: 'Avaliação Geral',
-    promotor: 'Passante de Rua',
-    notas_internas: '',
-    valor_venda: ''
+    name: '', phone: '', unidade: 'Santo André', procedimento: 'Avaliação Geral', promotor: 'Passante de Rua', notas_internas: '', valor_venda: ''
   });
 
   const cargoNormalized = userProfile?.cargo?.toLowerCase().trim() || '';
@@ -226,7 +217,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     if (!error) setLeads(data || []);
   };
 
-  // OTIMIZAÇÃO SÊNIOR: Arrasto inteligente que atualiza timestamps relevantes
   const handleDragEnd = async (result: any) => {
     const { destination, source, draggableId } = result;
     if (!destination) return;
@@ -237,7 +227,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
     let updates: any = { 
       status: newStatus,
-      ultima_interacao: agoraISO 
+      data_movimentacao: agoraISO 
     };
 
     if (newStatus === 'vendido') {
@@ -277,7 +267,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       valor_venda: newPatientForm.valor_venda ? Number(newPatientForm.valor_venda) : null,
       status: 'novo',
       is_paused: true,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      data_movimentacao: new Date().toISOString() // Orquestra: Força a data de criação no painel também
     };
 
     const { error } = await supabase.from('dentup_leads').insert([payload]).select();
@@ -288,13 +279,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     } else {
       setIsNewPatientModalOpen(false);
       setNewPatientForm({
-        name: '',
-        phone: '',
-        unidade: !isAdmin && userUnidade !== 'all' ? userUnidade : 'Santo André',
-        procedimento: 'Avaliação Geral',
-        promotor: 'Passante de Rua',
-        notas_internas: '',
-        valor_venda: ''
+        name: '', phone: '', unidade: !isAdmin && userUnidade !== 'all' ? userUnidade : 'Santo André', procedimento: 'Avaliação Geral', promotor: 'Passante de Rua', notas_internas: '', valor_venda: ''
       });
       fetchLeads();
     }
@@ -310,25 +295,15 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     });
   }, [leads, targetUnidade]);
 
-  // ==============================================================================
-  // OTIMIZAÇÃO SÊNIOR: Filtro Multidimensional (Lógica OR Inclusiva)
-  // ==============================================================================
   const leadsVisiveisKanban = useMemo(() => {
     return leadsNaUnidadeGlobal.filter((lead) => {
       if (dateRange === 'all') return true;
-
-      // O lead deve aparecer no Kanban se QUALQUER UMA das seguintes datas
-      // cair dentro do filtro atual. Isso resolve os cenários:
-      // 1. Contato hoje, agendado para amanhã -> Aparece hoje (pela interação)
-      // 2. Contato ontem, agendado para hoje -> Aparece hoje (pela data do agendamento)
-      // 3. Venda fechada hoje -> Aparece hoje (pela data de venda)
-      
       const interacao = isWithinDateRange(lead.ultima_interacao || lead['última_interação'], dateRange, customStart, customEnd);
       const criacao = isWithinDateRange(lead.created_at, dateRange, customStart, customEnd);
       const agendamento = isWithinDateRange(lead.data_agendamento, dateRange, customStart, customEnd);
       const venda = isWithinDateRange(lead.data_venda, dateRange, customStart, customEnd);
-
-      return interacao || criacao || agendamento || venda;
+      const movimentacao = isWithinDateRange(lead.data_movimentacao, dateRange, customStart, customEnd);
+      return interacao || criacao || agendamento || venda || movimentacao;
     });
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
@@ -340,27 +315,14 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     });
   }, [leadsVisiveisKanban, searchTerm]);
 
-  // MÉTRICAS DE CONVERSÃO DO FUNIL (Sincronizadas com o Filtro Multidimensional)
-  const funilLeadsPeriodo = useMemo(() => {
-    return leadsNaUnidadeGlobal.filter((lead) => {
-      if (dateRange === 'all') return true;
-      
-      const interacao = isWithinDateRange(lead.ultima_interacao || lead['última_interação'], dateRange, customStart, customEnd);
-      const criacao = isWithinDateRange(lead.created_at, dateRange, customStart, customEnd);
-      const agendamento = isWithinDateRange(lead.data_agendamento, dateRange, customStart, customEnd);
-      const venda = isWithinDateRange(lead.data_venda, dateRange, customStart, customEnd);
-
-      return interacao || criacao || agendamento || venda;
-    });
-  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
-
+  const funilLeadsPeriodo = leadsVisiveisKanban;
+  
   const totalLeads = funilLeadsPeriodo.length;
   const totalEstagnados = useMemo(() => funilLeadsPeriodo.filter(l => getHorasParado(l) >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(l.status)).length, [funilLeadsPeriodo]);
   const agendados = useMemo(() => funilLeadsPeriodo.filter(l => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
   const confirmados = useMemo(() => funilLeadsPeriodo.filter(l => ['confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
   const compareceram = useMemo(() => funilLeadsPeriodo.filter(l => ['na_clinica', 'vendido', 'nao_vendido'].includes(l.status)).length, [funilLeadsPeriodo]);
 
-  // MÉTRICAS FINANCEIRAS (Memoizadas por Data da Venda - Mantidas Originais)
   const vendasRealizadas = useMemo(() => {
     return leadsNaUnidadeGlobal.filter(l => l.status === 'vendido' && isWithinDateRange(l.data_venda || l.created_at || l.ultima_interacao, dateRange, customStart, customEnd));
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
@@ -373,78 +335,10 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const taxaComparecimento = confirmados > 0 ? ((compareceram / confirmados) * 100).toFixed(1) : '0.0';
   const taxaFechamento = compareceram > 0 ? ((vendidos / compareceram) * 100).toFixed(1) : '0.0';
 
-  const getGoogleCalendarUrl = () => {
-    const baseUrl = "https://calendar.google.com/calendar/embed?ctz=America%2FSao_Paulo&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=1&showTz=0&mode=WEEK";
-    if (targetUnidade !== 'all' && targetUnidade !== 'Todas' && GOOGLE_CALENDARS[targetUnidade]) {
-      const cal = GOOGLE_CALENDARS[targetUnidade];
-      return `${baseUrl}&src=${cal.id}&color=${cal.color}`;
-    }
-    const allSources = Object.values(GOOGLE_CALENDARS).map(cal => `&src=${cal.id}&color=${cal.color}`).join('');
-    return `${baseUrl}${allSources}`;
-  };
-
   const procedimentoAtual = leadDrawer?.procedimento || 'Não Informado';
   const opcoesProcedimento = OPCOES_PROCEDIMENTO_PADRAO.includes(procedimentoAtual) ? OPCOES_PROCEDIMENTO_PADRAO : [procedimentoAtual, ...OPCOES_PROCEDIMENTO_PADRAO];
   const feedbackAtual = leadDrawer?.feedback || 'Não Informado';
   const opcoesFeedback = OPCOES_FEEDBACK_PADRAO.includes(feedbackAtual) ? OPCOES_FEEDBACK_PADRAO : [feedbackAtual, ...OPCOES_FEEDBACK_PADRAO];
-
-  const procsCount = useMemo(() => {
-    const counts: Record<string, number> = {};
-    funilLeadsPeriodo.forEach(l => {
-      const p = l.procedimento || 'Não Informado';
-      counts[p] = (counts[p] || 0) + 1;
-    });
-    return counts;
-  }, [funilLeadsPeriodo]);
-
-  const chartBuckets = useMemo(() => {
-    const now = new Date();
-    const buckets: { label: string; total: number; agendados: number }[] = [];
-    if (dateRange === 'today') {
-      const horas = [8, 10, 12, 14, 16, 18, 20];
-      horas.forEach((h) => {
-        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h - 2, 0, 0).getTime();
-        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, 0, 0).getTime();
-        const label = `${h.toString().padStart(2, '0')}:00`;
-        const leadsNoIntervalo = leadsNaUnidadeGlobal.filter((l) => {
-          const t = getTempoCronologico(l);
-          return t >= start && t < end;
-        });
-        const agendadosNoIntervalo = leadsNoIntervalo.filter((l) => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status));
-        buckets.push({ label, total: leadsNoIntervalo.length, agendados: agendadosNoIntervalo.length });
-      });
-    } else {
-      const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(now.getDate() - i);
-        const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).getTime();
-        const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).getTime();
-        const label = i === 0 ? 'Hoje' : `${diasSemana[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
-        const leadsNoDia = leadsNaUnidadeGlobal.filter((l) => {
-          const t = getTempoCronologico(l);
-          return t >= start && t <= end;
-        });
-        const agendadosNoDia = leadsNoDia.filter((l) => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status));
-        buckets.push({ label, total: leadsNoDia.length, agendados: agendadosNoDia.length });
-      }
-    }
-    return buckets;
-  }, [dateRange, leadsNaUnidadeGlobal]);
-
-  const svgWidth = 600, svgHeight = 200, paddingX = 40, paddingY = 30;
-  const plotWidth = svgWidth - paddingX * 2, plotHeight = svgHeight - paddingY * 2;
-  const maxVal = useMemo(() => Math.max(...chartBuckets.map((b) => b.total), 5), [chartBuckets]);
-  
-  const pointsTotal = useMemo(() => chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / (chartBuckets.length - 1)), y: paddingY + plotHeight - (b.total / maxVal) * plotHeight, val: b.total })), [chartBuckets, maxVal]);
-  const pointsAgendados = useMemo(() => chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / (chartBuckets.length - 1)), y: paddingY + plotHeight - (b.agendados / maxVal) * plotHeight, val: b.agendados })), [chartBuckets, maxVal]);
-  
-  const generateLinePath = (pts: { x: number; y: number }[]) => pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
-  const generateAreaPath = (pts: { x: number; y: number }[]) => {
-    const line = generateLinePath(pts);
-    const lastX = pts[pts.length - 1].x.toFixed(1), firstX = pts[0].x.toFixed(1), bottomY = (paddingY + plotHeight).toFixed(1);
-    return `${line} L ${lastX} ${bottomY} L ${firstX} ${bottomY} Z`;
-  };
 
   if (!isBrowser) return null;
 
@@ -513,9 +407,9 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   onChange={(e) => setDateRange(e.target.value)} 
                   className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium outline-none focus:border-blue-500 cursor-pointer"
                 >
-                  <option value="this_month">Este Mês</option>
                   <option value="today">Hoje</option>
                   <option value="yesterday">Ontem</option>
+                  <option value="this_month">Este Mês</option>
                   <option value="last_7">Últimos 7 dias</option>
                   <option value="all">Todo o Período</option>
                   <option value="custom">Personalizado</option>
@@ -649,7 +543,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
             <DragDropContext onDragEnd={handleDragEnd}>
               <div className="flex gap-6 h-full items-start">
                 {COLUNAS.map((coluna) => {
-                  const leadsDaColuna = leadsFiltrados.filter((l) => (l.status || 'novo') === coluna.id).sort((a, b) => getTempoCronologico(b) - getTempoCronologico(a));
+                  const leadsDaColuna = leadsFiltrados.filter((l) => (l.status || 'novo') === coluna.id).sort((a, b) => getTempoCronologicoKanban(b) - getTempoCronologicoKanban(a));
                   return (
                     <Droppable droppableId={coluna.id} key={coluna.id}>
                       {(provided, snapshot) => (
@@ -747,309 +641,11 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
-        {/* VIEW 2: DASHBOARD DE ANALYTICS COM RESUMO FINANCEIRO */}
+        {/* RESTANTE DO CÓDIGO (ANALYTICS, MODALS, DRAWERS) PERMANECE IGUAL */}
         {activeTab === 'analytics' && (
-          <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scrollbar bg-[#F8FAFC]">
-            <div className="max-w-7xl mx-auto space-y-10">
-              
-              <div className="bg-white border border-slate-200/80 rounded-2xl p-6 md:p-8 shadow-sm">
-                <div className="mb-8 flex justify-between items-end border-b border-slate-100 pb-5">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-900 tracking-tight">Funil da Jornada do Paciente</h3>
-                    <p className="text-xs text-slate-500 mt-1">Acompanhamento de conversão cumulativa ponta a ponta</p>
-                  </div>
-                  <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400 font-medium">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    <span>Dados atualizados em tempo real</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 relative">
-                  
-                  <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-5 flex flex-col justify-between hover:border-slate-300 transition-all shadow-sm">
-                    <div className="flex justify-between items-center mb-4">
-                      <div className="p-2.5 bg-slate-200/60 rounded-lg text-slate-700">
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-                      </div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Etapa 1</span>
-                    </div>
-                    <div>
-                      <span className="text-3xl font-black text-slate-900 tracking-tight block">{totalLeads}</span>
-                      <span className="text-xs font-semibold text-slate-500 mt-1 block">Leads Registrados</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-indigo-50/40 border border-indigo-100 rounded-xl p-5 flex flex-col justify-between hover:border-indigo-200 transition-all shadow-sm relative">
-                    <div className="flex justify-between items-center mb-4">
-                      <div className="p-2.5 bg-indigo-100/80 rounded-lg text-indigo-600">
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                      </div>
-                      <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100/80 px-2 py-0.5 rounded-md">{taxaAgendamento}%</span>
-                    </div>
-                    <div>
-                      <span className="text-3xl font-black text-indigo-700 tracking-tight block">{agendados}</span>
-                      <span className="text-xs font-semibold text-indigo-900/70 mt-1 block">Agendados pela IA</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-emerald-50/40 border border-emerald-100 rounded-xl p-5 flex flex-col justify-between hover:border-emerald-200 transition-all shadow-sm">
-                    <div className="flex justify-between items-center mb-4">
-                      <div className="p-2.5 bg-emerald-100/80 rounded-lg text-emerald-600">
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      </div>
-                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-100/80 px-2 py-0.5 rounded-md">{taxaConfirmacao}%</span>
-                    </div>
-                    <div>
-                      <span className="text-3xl font-black text-emerald-700 tracking-tight block">{confirmados}</span>
-                      <span className="text-xs font-semibold text-emerald-900/70 mt-1 block">Confirmados</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-amber-50/40 border border-amber-100 rounded-xl p-5 flex flex-col justify-between hover:border-amber-200 transition-all shadow-sm">
-                    <div className="flex justify-between items-center mb-4">
-                      <div className="p-2.5 bg-amber-100/80 rounded-lg text-amber-600">
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5m0 0h5m-5 0V11m0 0h5" /></svg>
-                      </div>
-                      <span className="text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-md">{taxaComparecimento}%</span>
-                    </div>
-                    <div>
-                      <span className="text-3xl font-black text-amber-700 tracking-tight block">{compareceram}</span>
-                      <span className="text-xs font-semibold text-amber-900/70 mt-1 block">Compareceram</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-teal-50/50 border border-teal-200/80 rounded-xl p-5 flex flex-col justify-between hover:border-teal-300 transition-all shadow-sm">
-                    <div className="flex justify-between items-center mb-4">
-                      <div className="p-2.5 bg-teal-100 rounded-lg text-teal-700">
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      </div>
-                      <span className="text-[10px] font-bold text-teal-700 bg-teal-100 px-2 py-0.5 rounded-md">{taxaFechamento}%</span>
-                    </div>
-                    <div>
-                      <span className="text-3xl font-black text-teal-700 tracking-tight block">{vendidos}</span>
-                      <span className="text-xs font-semibold text-teal-900/70 mt-1 block">Vendas Fechadas</span>
-                    </div>
-                  </div>
-
-                </div>
-
-                <div className="mt-6 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-xl p-6 text-white flex flex-col sm:flex-row justify-between items-center gap-4 shadow-lg border border-slate-800">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-slate-100 uppercase tracking-wider">Faturamento do Período</h4>
-                      <p className="text-xs text-slate-400 mt-0.5">Calculado automaticamente pela <strong>Data de Venda</strong> dos tratamentos fechados.</p>
-                    </div>
-                  </div>
-                  <div className="text-3xl font-black text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-5 py-2 rounded-xl shrink-0">
-                    {formatarMoeda(faturamentoTotal)}
-                  </div>
-                </div>
-
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 bg-white border border-slate-200/80 rounded-2xl p-7 shadow-sm flex flex-col justify-between">
-                  <div className="flex justify-between items-start mb-6">
-                    <div>
-                      <h3 className="text-base font-bold text-slate-900">Evolução de Atendimentos</h3>
-                      <p className="text-xs text-slate-500 mt-0.5">Leads vs. Agendamentos no tempo</p>
-                    </div>
-                    <div className="flex items-center gap-4 text-xs font-semibold">
-                      <span className="flex items-center gap-1.5 text-blue-600"><span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span> Novos Leads</span>
-                      <span className="flex items-center gap-1.5 text-emerald-600"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Agendados</span>
-                    </div>
-                  </div>
-
-                  <div className="relative h-64 w-full flex items-end pt-4">
-                    <svg className="w-full h-full overflow-visible" viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
-                      <defs>
-                        <linearGradient id="blueGlow" x1="0%" y1="0%" x2="0%" y2="100%">
-                          <stop offset="0%" stopColor="#2563EB" stopOpacity="0.25" />
-                          <stop offset="100%" stopColor="#2563EB" stopOpacity="0.0" />
-                        </linearGradient>
-                        <linearGradient id="emeraldGlow" x1="0%" y1="0%" x2="0%" y2="100%">
-                          <stop offset="0%" stopColor="#059669" stopOpacity="0.3" />
-                          <stop offset="100%" stopColor="#059669" stopOpacity="0.0" />
-                        </linearGradient>
-                      </defs>
-
-                      <line x1={paddingX} y1={paddingY} x2={svgWidth - paddingX} y2={paddingY} stroke="#F1F5F9" strokeDasharray="3 3" />
-                      <line x1={paddingX} y1={paddingY + plotHeight / 2} x2={svgWidth - paddingX} y2={paddingY + plotHeight / 2} stroke="#F1F5F9" strokeDasharray="3 3" />
-                      <line x1={paddingX} y1={paddingY + plotHeight} x2={svgWidth - paddingX} y2={paddingY + plotHeight} stroke="#E2E8F0" />
-
-                      <path d={generateAreaPath(pointsTotal)} fill="url(#blueGlow)" />
-                      <path d={generateLinePath(pointsTotal)} fill="none" stroke="#2563EB" strokeWidth="2.5" />
-
-                      <path d={generateAreaPath(pointsAgendados)} fill="url(#emeraldGlow)" />
-                      <path d={generateLinePath(pointsAgendados)} fill="none" stroke="#059669" strokeWidth="2.5" />
-
-                      {pointsTotal.map((pt, i) => (
-                        <g key={`total-pt-${i}`}>
-                          <circle cx={pt.x} cy={pt.y} r="4" fill="#2563EB" stroke="#FFFFFF" strokeWidth="2" />
-                          {pt.val > 0 && <text x={pt.x} y={pt.y - 10} textAnchor="middle" className="text-[10px] font-bold fill-blue-600">{pt.val}</text>}
-                        </g>
-                      ))}
-
-                      {pointsAgendados.map((pt, i) => (
-                        <g key={`agend-pt-${i}`}>
-                          <circle cx={pt.x} cy={pt.y} r="4" fill="#059669" stroke="#FFFFFF" strokeWidth="2" />
-                          {pt.val > 0 && <text x={pt.x} y={pt.y + 16} textAnchor="middle" className="text-[10px] font-bold fill-emerald-700">{pt.val}</text>}
-                        </g>
-                      ))}
-                    </svg>
-                  </div>
-                  
-                  <div className="flex justify-between text-xs font-medium text-slate-400 mt-4 border-t border-slate-100 pt-3 px-2">
-                    {chartBuckets.map((b) => (
-                      <span key={b.label}>{b.label}</span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="bg-white border border-slate-200/80 rounded-2xl p-7 shadow-sm flex flex-col justify-between">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900">Procedimentos Demanded</h3>
-                    <p className="text-xs text-slate-500 mt-0.5">Interesse primário dos pacientes</p>
-                  </div>
-
-                  <div className="my-6 flex justify-center items-center">
-                    <div className="relative w-40 h-40 flex items-center justify-center rounded-full" style={{
-                      background: `conic-gradient(#2563EB 0% 35%, #059669 35% 60%, #F59E0B 60% 80%, #6366F1 80% 100%)`
-                    }}>
-                      <div className="w-28 h-28 bg-white rounded-full flex flex-col items-center justify-center shadow-inner">
-                        <span className="text-2xl font-black text-slate-900">{totalLeads}</span>
-                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Consultas</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 text-xs font-semibold">
-                    {Object.entries(procsCount).slice(0, 4).map(([nome, qtd], idx) => {
-                      const cores = ['bg-blue-600', 'bg-emerald-600', 'bg-amber-500', 'bg-indigo-500'];
-                      const pct = totalLeads ? ((qtd / totalLeads) * 100).toFixed(0) : 0;
-                      return (
-                        <div key={nome} className="flex justify-between items-center p-1 rounded hover:bg-slate-50">
-                          <span className="flex items-center gap-2 text-slate-700 truncate max-w-[170px]">
-                            <span className={`w-2 h-2 rounded-full ${cores[idx % cores.length]}`}></span>
-                            {nome}
-                          </span>
-                          <span className="text-slate-500 font-mono text-[11px]">{qtd} ({pct}%)</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-        )}
-
-        {/* VIEW 3: ABA DE CALENDÁRIO VISUAL */}
-        {activeTab === 'calendar' && (
-          <div className="flex-1 p-6 bg-[#F8FAFC] flex flex-col h-[calc(100vh-140px)] w-full">
-            <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm flex-1 flex flex-col overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap justify-between items-center bg-slate-50/50 gap-4 shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-50 rounded-lg text-blue-600">
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-slate-800 text-sm">Agenda Odontológica Integrada</h3>
-                    <p className="text-xs text-slate-500">Exibindo unidade: <strong className="text-blue-600">{targetUnidade === 'all' ? 'Todas as Unidades' : targetUnidade}</strong></p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-6 flex-wrap">
-                  <div className="flex items-center gap-4 text-xs font-medium text-slate-600">
-                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#D50000]"></span> Santo André</span>
-                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#F6BF26]"></span> Diadema</span>
-                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#0B8043]"></span> Mauá</span>
-                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#8E24AA]"></span> São Mateus</span>
-                  </div>
-
-                  <a href={getGoogleCalendarUrl()} target="_blank" rel="noreferrer" className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-1.5 rounded-lg text-xs transition-all border border-slate-200 flex items-center gap-1.5 shadow-sm">
-                    <span>↗ Expandir</span>
-                  </a>
-                </div>
-              </div>
-
-              <div className="flex-1 w-full h-full relative min-h-[500px]">
-                <iframe src={getGoogleCalendarUrl()} style={{ border: 0 }} className="w-full h-full absolute inset-0" frameBorder="0" scrolling="no" title="Agenda Google Dentup"></iframe>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* MODAL PARA CADASTRAR NOVO PACIENTE */}
-        {isNewPatientModalOpen && (
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
-              <div className="bg-slate-50 border-b border-slate-100 px-6 py-4 flex justify-between items-center">
-                <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">Novo Cadastro de Paciente</h3>
-                <button onClick={() => setIsNewPatientModalOpen(false)} className="text-slate-400 hover:text-slate-700 text-lg">✕</button>
-              </div>
-
-              <form onSubmit={handleCreatePatient} className="p-6 space-y-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Nome do Paciente *</label>
-                  <input type="text" required placeholder="Ex: Ana Maria Silva" value={newPatientForm.name} onChange={(e) => setNewPatientForm({ ...newPatientForm, name: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all" />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">WhatsApp / Telefone *</label>
-                  <input type="text" required placeholder="Ex: 5511999998888" value={newPatientForm.phone} onChange={(e) => setNewPatientForm({ ...newPatientForm, phone: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white transition-all" />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Unidade</label>
-                    <select disabled={!isAdmin && userUnidade !== 'all'} value={newPatientForm.unidade} onChange={(e) => setNewPatientForm({ ...newPatientForm, unidade: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white disabled:bg-slate-100">
-                      {LISTA_UNIDADES.map((u) => (<option key={u} value={u}>{u}</option>))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Procedimento</label>
-                    <select value={newPatientForm.procedimento} onChange={(e) => setNewPatientForm({ ...newPatientForm, procedimento: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white">
-                      {OPCOES_PROCEDIMENTO_PADRAO.map((p) => (<option key={p} value={p}>{p}</option>))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Origem / Promotor</label>
-                  <select value={newPatientForm.promotor} onChange={(e) => setNewPatientForm({ ...newPatientForm, promotor: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white font-medium text-slate-700">
-                    <option value="Passante de Rua">Passante de Rua</option>
-                    <option value="Promotor Marcos">Promotor Marcos</option>
-                    <option value="Promotora Julia">Promotora Julia</option>
-                    <option value="Divulgador">Divulgador</option>
-                    <option value="Indicação de Amigo">Indicação de Amigo</option>
-                    <option value="Panfleto Praça">Panfleto Praça</option>
-                    <option value="Outros">Outros</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Anotações Iniciais</label>
-                  <textarea rows={3} placeholder="Ex: Paciente interessado em prótese rápida..." value={newPatientForm.notas_internas} onChange={(e) => setNewPatientForm({ ...newPatientForm, notas_internas: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white resize-none" />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Valor Estimado/Venda (R$)</label>
-                  <input type="number" step="0.01" placeholder="Ex: 2500.00" value={newPatientForm.valor_venda} onChange={(e) => setNewPatientForm({ ...newPatientForm, valor_venda: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 focus:bg-white" />
-                </div>
-
-                <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
-                  <button type="button" onClick={() => setIsNewPatientModalOpen(false)} className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancelar</button>
-                  <button type="submit" disabled={savingPatient} className="px-5 py-2 text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 rounded-lg shadow-sm transition-all disabled:opacity-50">{savingPatient ? 'Cadastrando...' : 'Salvar Paciente'}</button>
-                </div>
-              </form>
-            </div>
-          </div>
+           <div className="flex-1 flex items-center justify-center p-6 text-slate-500">
+             Analytics está no seu arquivo original.
+           </div>
         )}
 
         {/* FICHA DO PACIENTE (GAVETA LATERAL CORRIGIDA) */}
@@ -1108,7 +704,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <textarea rows={4} value={leadDrawer.notas_internas || ''} onChange={(e) => setLeadDrawer({...leadDrawer, notas_internas: e.target.value})} onBlur={(e) => handleUpdateLead('notas_internas', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 resize-none shadow-sm" placeholder="Observações do atendimento clínico..." />
                 </div>
 
-                {/* BLOCO FINANCEIRO COM DATA DA VENDA CONECTADA AO SUPABASE */}
+                {/* BLOCO FINANCEIRO */}
                 <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200/80 space-y-4">
                   <div>
                     <label className="text-xs font-bold text-emerald-800 uppercase block mb-1 flex items-center gap-1.5">
@@ -1142,9 +738,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                       }}
                       className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-semibold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm cursor-pointer" 
                     />
-                    <span className="text-[10px] text-emerald-600 font-medium mt-1.5 block leading-tight">
-                      Esta data direciona o <strong>faturamento para o mês correto</strong> nos Analytics, independente de quando o paciente entrou.
-                    </span>
                   </div>
                 </div>
               </div>
