@@ -310,23 +310,25 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     });
   }, [leads, targetUnidade]);
 
-  // OTIMIZAÇÃO SÊNIOR: Função de filtro por data adaptativa por contexto da etapa
+  // ==============================================================================
+  // OTIMIZAÇÃO SÊNIOR: Filtro Multidimensional (Lógica OR Inclusiva)
+  // ==============================================================================
   const leadsVisiveisKanban = useMemo(() => {
     return leadsNaUnidadeGlobal.filter((lead) => {
       if (dateRange === 'all') return true;
 
-      // Determina a data mais relevante com base no status do paciente
-      let dataParaFiltrar = lead.created_at;
+      // O lead deve aparecer no Kanban se QUALQUER UMA das seguintes datas
+      // cair dentro do filtro atual. Isso resolve os cenários:
+      // 1. Contato hoje, agendado para amanhã -> Aparece hoje (pela interação)
+      // 2. Contato ontem, agendado para hoje -> Aparece hoje (pela data do agendamento)
+      // 3. Venda fechada hoje -> Aparece hoje (pela data de venda)
+      
+      const interacao = isWithinDateRange(lead.ultima_interacao || lead['última_interação'], dateRange, customStart, customEnd);
+      const criacao = isWithinDateRange(lead.created_at, dateRange, customStart, customEnd);
+      const agendamento = isWithinDateRange(lead.data_agendamento, dateRange, customStart, customEnd);
+      const venda = isWithinDateRange(lead.data_venda, dateRange, customStart, customEnd);
 
-      if (lead.status === 'vendido') {
-        dataParaFiltrar = lead.data_venda || lead.ultima_interacao || lead.created_at;
-      } else if (['agendado', 'confirmado', 'na_clinica', 'no_show'].includes(lead.status)) {
-        dataParaFiltrar = lead.data_agendamento || lead.ultima_interacao || lead.created_at;
-      } else if (['nao_vendido', 'encerrado'].includes(lead.status)) {
-        dataParaFiltrar = lead.ultima_interacao || lead.created_at;
-      }
-
-      return isWithinDateRange(dataParaFiltrar, dateRange, customStart, customEnd);
+      return interacao || criacao || agendamento || venda;
     });
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
@@ -338,11 +340,18 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     });
   }, [leadsVisiveisKanban, searchTerm]);
 
-  // MÉTRICAS DE CONVERSÃO DO FUNIL (Memoizadas)
+  // MÉTRICAS DE CONVERSÃO DO FUNIL (Sincronizadas com o Filtro Multidimensional)
   const funilLeadsPeriodo = useMemo(() => {
-    return leadsNaUnidadeGlobal.filter((lead) => 
-      isWithinDateRange(lead.created_at || lead.ultima_interacao || lead['última_interação'], dateRange, customStart, customEnd)
-    );
+    return leadsNaUnidadeGlobal.filter((lead) => {
+      if (dateRange === 'all') return true;
+      
+      const interacao = isWithinDateRange(lead.ultima_interacao || lead['última_interação'], dateRange, customStart, customEnd);
+      const criacao = isWithinDateRange(lead.created_at, dateRange, customStart, customEnd);
+      const agendamento = isWithinDateRange(lead.data_agendamento, dateRange, customStart, customEnd);
+      const venda = isWithinDateRange(lead.data_venda, dateRange, customStart, customEnd);
+
+      return interacao || criacao || agendamento || venda;
+    });
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
   const totalLeads = funilLeadsPeriodo.length;
@@ -351,7 +360,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const confirmados = useMemo(() => funilLeadsPeriodo.filter(l => ['confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
   const compareceram = useMemo(() => funilLeadsPeriodo.filter(l => ['na_clinica', 'vendido', 'nao_vendido'].includes(l.status)).length, [funilLeadsPeriodo]);
 
-  // MÉTRICAS FINANCEIRAS (Memoizadas por Data da Venda)
+  // MÉTRICAS FINANCEIRAS (Memoizadas por Data da Venda - Mantidas Originais)
   const vendasRealizadas = useMemo(() => {
     return leadsNaUnidadeGlobal.filter(l => l.status === 'vendido' && isWithinDateRange(l.data_venda || l.created_at || l.ultima_interacao, dateRange, customStart, customEnd));
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
