@@ -4,6 +4,14 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
+// 1. PARSER SEGURO GLOBAL: Vacina anti-NaN para evitar datas inválidas
+const parseDataSegura = (dateStr: string | null | undefined): number => {
+  if (!dateStr) return 0;
+  const safeStr = typeof dateStr === 'string' ? dateStr.trim().replace(' ', 'T') : dateStr;
+  const time = new Date(safeStr).getTime();
+  return isNaN(time) ? 0 : time;
+};
+
 const COLUNAS = [
   { id: 'novo', titulo: 'Novos Pacientes', dot: 'bg-blue-500' },
   { id: 'nao_respondeu', titulo: 'Não Respondeu', dot: 'bg-amber-500' },
@@ -36,14 +44,13 @@ const OPCOES_FEEDBACK_PADRAO = [
   'SEM INTERESSE', 'VOU FALAR COM A FAMILIA', 'SEM DINHEIRO'
 ];
 
-// ORQUESTRA: Motor de tempo EXCLUSIVO para o Kanban (Não usa mais ultima_interacao)
+// Motor de tempo exclusivo do Kanban (Usa data_movimentacao ou created_at)
 const getTempoCronologicoKanban = (lead: any) => {
-  // Prioridade: 1º Quando foi movido no Kanban, 2º Quando foi criado.
-  const data = lead.data_movimentacao || lead.created_at;
-  return data ? new Date(data).getTime() : 0;
+  const timeMovimentacao = parseDataSegura(lead.data_movimentacao);
+  if (timeMovimentacao > 0) return timeMovimentacao;
+  return parseDataSegura(lead.created_at);
 };
 
-// ORQUESTRA: Calcula horas parado na coluna baseado na movimentação, não no chat
 const getHorasParado = (lead: any): number => {
   const timeMs = getTempoCronologicoKanban(lead);
   if (!timeMs) return 0;
@@ -60,42 +67,32 @@ const formatarTempoParado = (horas: number): string => {
 
 const formatarDataAgendamento = (dateStr?: string | null): string => {
   if (!dateStr) return '';
-  try {
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return '';
-    const dia = date.getDate().toString().padStart(2, '0');
-    const mes = (date.getMonth() + 1).toString().padStart(2, '0');
-    const horas = date.getHours().toString().padStart(2, '0');
-    const minutos = date.getMinutes().toString().padStart(2, '0');
-    return `${dia}/${mes} às ${horas}:${minutos}`;
-  } catch {
-    return '';
-  }
+  const time = parseDataSegura(dateStr);
+  if (!time) return '';
+  const date = new Date(time);
+  const dia = date.getDate().toString().padStart(2, '0');
+  const mes = (date.getMonth() + 1).toString().padStart(2, '0');
+  const horas = date.getHours().toString().padStart(2, '0');
+  const minutos = date.getMinutes().toString().padStart(2, '0');
+  return `${dia}/${mes} às ${horas}:${minutos}`;
 };
 
 const formatarDataCurta = (dateStr?: string | null): string => {
   if (!dateStr) return '';
-  try {
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return '';
-    return date.toLocaleDateString('pt-BR');
-  } catch {
-    return '';
-  }
+  const time = parseDataSegura(dateStr);
+  if (!time) return '';
+  return new Date(time).toLocaleDateString('pt-BR');
 };
 
 const formatarDataInput = (isoDate?: string | null): string => {
   if (!isoDate) return '';
-  try {
-    const date = new Date(isoDate);
-    if (isNaN(date.getTime())) return '';
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  } catch {
-    return '';
-  }
+  const time = parseDataSegura(isoDate);
+  if (!time) return '';
+  const date = new Date(time);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 };
 
 const dateInputToISO = (dateStr: string): string | null => {
@@ -125,16 +122,12 @@ const formatarMoeda = (val?: number | string | null): string => {
   return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
-const isWithinDateRange = (dateStr: string | null, range: string, customStart?: string, customEnd?: string) => {
+const isWithinDateRange = (dateStr: string | null | undefined, range: string, customStart?: string, customEnd?: string) => {
   if (range === 'all') return true;
-  if (!dateStr) return false;
-  
-  const leadDate = new Date(dateStr);
-  if (isNaN(leadDate.getTime())) return false;
+  const leadTime = parseDataSegura(dateStr);
+  if (leadTime === 0) return false;
 
-  const leadTime = leadDate.getTime();
   const now = new Date();
-
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
   const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
 
@@ -194,13 +187,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const [isNewPatientModalOpen, setIsNewPatientModalOpen] = useState(false);
   const [savingPatient, setSavingPatient] = useState(false);
   const [newPatientForm, setNewPatientForm] = useState({
-    name: '',
-    phone: '',
-    unidade: 'Santo André',
-    procedimento: 'Avaliação Geral',
-    promotor: 'Passante de Rua',
-    notas_internas: '',
-    valor_venda: ''
+    name: '', phone: '', unidade: 'Santo André', procedimento: 'Avaliação Geral', promotor: 'Passante de Rua', notas_internas: '', valor_venda: ''
   });
 
   const cargoNormalized = userProfile?.cargo?.toLowerCase().trim() || '';
@@ -228,7 +215,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     if (!error) setLeads(data || []);
   };
 
-  // ORQUESTRA: Função de Drag Inteligente.
+  // Blinda o drag para atualizar SOMENTE data_movimentacao (sem tocar em ultima_interacao do Chat)
   const handleDragEnd = async (result: any) => {
     const { destination, source, draggableId } = result;
     if (!destination) return;
@@ -237,9 +224,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     const newStatus = destination.droppableId;
     const agoraISO = new Date().toISOString();
 
-    // AQUI ESTÁ A CORREÇÃO MESTRA:
-    // Nós paramos de enviar 'ultima_interacao'. 
-    // Em vez disso, enviamos para 'data_movimentacao', preservando a ordem do Chat.
     let updates: any = { 
       status: newStatus,
       data_movimentacao: agoraISO 
@@ -282,7 +266,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       valor_venda: newPatientForm.valor_venda ? Number(newPatientForm.valor_venda) : null,
       status: 'novo',
       is_paused: true,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      data_movimentacao: new Date().toISOString()
     };
 
     const { error } = await supabase.from('dentup_leads').insert([payload]).select();
@@ -293,13 +278,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     } else {
       setIsNewPatientModalOpen(false);
       setNewPatientForm({
-        name: '',
-        phone: '',
-        unidade: !isAdmin && userUnidade !== 'all' ? userUnidade : 'Santo André',
-        procedimento: 'Avaliação Geral',
-        promotor: 'Passante de Rua',
-        notas_internas: '',
-        valor_venda: ''
+        name: '', phone: '', unidade: !isAdmin && userUnidade !== 'all' ? userUnidade : 'Santo André', procedimento: 'Avaliação Geral', promotor: 'Passante de Rua', notas_internas: '', valor_venda: ''
       });
       fetchLeads();
     }
@@ -315,6 +294,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     });
   }, [leads, targetUnidade]);
 
+  // Cartões visíveis nas colunas do Kanban
   const leadsVisiveisKanban = useMemo(() => {
     return leadsNaUnidadeGlobal.filter((lead) => {
       if (dateRange === 'all') return true;
@@ -322,7 +302,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       const criacao = isWithinDateRange(lead.created_at, dateRange, customStart, customEnd);
       const agendamento = isWithinDateRange(lead.data_agendamento, dateRange, customStart, customEnd);
       const venda = isWithinDateRange(lead.data_venda, dateRange, customStart, customEnd);
-      return interacao || criacao || agendamento || venda;
+      const movimentacao = isWithinDateRange(lead.data_movimentacao, dateRange, customStart, customEnd);
+      return interacao || criacao || agendamento || venda || movimentacao;
     });
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
@@ -334,29 +315,47 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     });
   }, [leadsVisiveisKanban, searchTerm]);
 
-  const funilLeadsPeriodo = useMemo(() => {
-    return leadsNaUnidadeGlobal.filter((lead) => {
-      if (dateRange === 'all') return true;
-      const interacao = isWithinDateRange(lead.ultima_interacao || lead['última_interação'], dateRange, customStart, customEnd);
-      const criacao = isWithinDateRange(lead.created_at, dateRange, customStart, customEnd);
-      const agendamento = isWithinDateRange(lead.data_agendamento, dateRange, customStart, customEnd);
-      const venda = isWithinDateRange(lead.data_venda, dateRange, customStart, customEnd);
-      return interacao || criacao || agendamento || venda;
-    });
+  // --- BLINDAGEM DAS MÉTRICAS DO FUNIL ---
+  // 1. Novos Leads do Período: Considera estritamente a DATA DE CRIAÇÃO (created_at)
+  const leadsCriadosNoPeriodo = useMemo(() => {
+    return leadsNaUnidadeGlobal.filter((l) => isWithinDateRange(l.created_at, dateRange, customStart, customEnd));
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
-  const totalLeads = funilLeadsPeriodo.length;
-  const totalEstagnados = useMemo(() => funilLeadsPeriodo.filter(l => getHorasParado(l) >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(l.status)).length, [funilLeadsPeriodo]);
-  const agendados = useMemo(() => funilLeadsPeriodo.filter(l => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
-  const confirmados = useMemo(() => funilLeadsPeriodo.filter(l => ['confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status)).length, [funilLeadsPeriodo]);
-  const compareceram = useMemo(() => funilLeadsPeriodo.filter(l => ['na_clinica', 'vendido', 'nao_vendido'].includes(l.status)).length, [funilLeadsPeriodo]);
+  const totalLeads = leadsCriadosNoPeriodo.length;
 
+  // 2. Agendamentos no Período
+  const agendados = useMemo(() => {
+    return leadsNaUnidadeGlobal.filter(l => 
+      ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status) &&
+      isWithinDateRange(l.data_agendamento || l.created_at, dateRange, customStart, customEnd)
+    ).length;
+  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
+
+  const confirmados = useMemo(() => {
+    return leadsNaUnidadeGlobal.filter(l => 
+      ['confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status) &&
+      isWithinDateRange(l.data_agendamento || l.created_at, dateRange, customStart, customEnd)
+    ).length;
+  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
+
+  const compareceram = useMemo(() => {
+    return leadsNaUnidadeGlobal.filter(l => 
+      ['na_clinica', 'vendido', 'nao_vendido'].includes(l.status) &&
+      isWithinDateRange(l.data_agendamento || l.created_at, dateRange, customStart, customEnd)
+    ).length;
+  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
+
+  // 3. Vendas e Faturamento do Período (baseado estritamente em data_venda)
   const vendasRealizadas = useMemo(() => {
-    return leadsNaUnidadeGlobal.filter(l => l.status === 'vendido' && isWithinDateRange(l.data_venda || l.created_at || l.ultima_interacao, dateRange, customStart, customEnd));
+    return leadsNaUnidadeGlobal.filter(l => l.status === 'vendido' && isWithinDateRange(l.data_venda || l.created_at, dateRange, customStart, customEnd));
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
   const vendidos = vendasRealizadas.length;
   const faturamentoTotal = useMemo(() => vendasRealizadas.reduce((acc, l) => acc + (Number(l.valor_venda) || 0), 0), [vendasRealizadas]);
+
+  const totalEstagnados = useMemo(() => {
+    return leadsNaUnidadeGlobal.filter(l => getHorasParado(l) >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(l.status)).length;
+  }, [leadsNaUnidadeGlobal]);
 
   const taxaAgendamento = totalLeads > 0 ? ((agendados / totalLeads) * 100).toFixed(1) : '0.0';
   const taxaConfirmacao = agendados > 0 ? ((confirmados / agendados) * 100).toFixed(1) : '0.0';
@@ -378,14 +377,15 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const feedbackAtual = leadDrawer?.feedback || 'Não Informado';
   const opcoesFeedback = OPCOES_FEEDBACK_PADRAO.includes(feedbackAtual) ? OPCOES_FEEDBACK_PADRAO : [feedbackAtual, ...OPCOES_FEEDBACK_PADRAO];
 
+  // Métricas do Gráfico da Aba Analytics
   const procsCount = useMemo(() => {
     const counts: Record<string, number> = {};
-    funilLeadsPeriodo.forEach(l => {
+    leadsCriadosNoPeriodo.forEach(l => {
       const p = l.procedimento || 'Não Informado';
       counts[p] = (counts[p] || 0) + 1;
     });
     return counts;
-  }, [funilLeadsPeriodo]);
+  }, [leadsCriadosNoPeriodo]);
 
   const chartBuckets = useMemo(() => {
     const now = new Date();
@@ -397,7 +397,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
         const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, 0, 0).getTime();
         const label = `${h.toString().padStart(2, '0')}:00`;
         const leadsNoIntervalo = leadsNaUnidadeGlobal.filter((l) => {
-          const t = getTempoCronologicoKanban(l);
+          const t = parseDataSegura(l.created_at);
           return t >= start && t < end;
         });
         const agendadosNoIntervalo = leadsNoIntervalo.filter((l) => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status));
@@ -412,7 +412,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
         const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).getTime();
         const label = i === 0 ? 'Hoje' : `${diasSemana[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
         const leadsNoDia = leadsNaUnidadeGlobal.filter((l) => {
-          const t = getTempoCronologicoKanban(l);
+          const t = parseDataSegura(l.created_at);
           return t >= start && t <= end;
         });
         const agendadosNoDia = leadsNoDia.filter((l) => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status));
@@ -426,11 +426,12 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const plotWidth = svgWidth - paddingX * 2, plotHeight = svgHeight - paddingY * 2;
   const maxVal = useMemo(() => Math.max(...chartBuckets.map((b) => b.total), 5), [chartBuckets]);
   
-  const pointsTotal = useMemo(() => chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / (chartBuckets.length - 1)), y: paddingY + plotHeight - (b.total / maxVal) * plotHeight, val: b.total })), [chartBuckets, maxVal]);
-  const pointsAgendados = useMemo(() => chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / (chartBuckets.length - 1)), y: paddingY + plotHeight - (b.agendados / maxVal) * plotHeight, val: b.agendados })), [chartBuckets, maxVal]);
+  const pointsTotal = useMemo(() => chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / Math.max(chartBuckets.length - 1, 1)), y: paddingY + plotHeight - (b.total / maxVal) * plotHeight, val: b.total })), [chartBuckets, maxVal, plotWidth, plotHeight]);
+  const pointsAgendados = useMemo(() => chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / Math.max(chartBuckets.length - 1, 1)), y: paddingY + plotHeight - (b.agendados / maxVal) * plotHeight, val: b.agendados })), [chartBuckets, maxVal, plotWidth, plotHeight]);
   
   const generateLinePath = (pts: { x: number; y: number }[]) => pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
   const generateAreaPath = (pts: { x: number; y: number }[]) => {
+    if (pts.length === 0) return '';
     const line = generateLinePath(pts);
     const lastX = pts[pts.length - 1].x.toFixed(1), firstX = pts[0].x.toFixed(1), bottomY = (paddingY + plotHeight).toFixed(1);
     return `${line} L ${lastX} ${bottomY} L ${firstX} ${bottomY} Z`;
@@ -544,7 +545,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         </div>
 
-        {/* LINHA 2: BANNER DE METRICAS DO FUNIL COM DESTAQUE FINANCEIRO */}
+        {/* LINHA 2: BANNER DE MÉTRICAS DO FUNIL COM DESTAQUE FINANCEIRO */}
         <div className="px-6 py-3 bg-slate-50/70 flex items-center justify-between gap-4 overflow-x-auto custom-scrollbar">
           
           <div className="flex items-center gap-6 md:gap-8 shrink-0">
@@ -639,8 +640,10 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
             <DragDropContext onDragEnd={handleDragEnd}>
               <div className="flex gap-6 h-full items-start">
                 {COLUNAS.map((coluna) => {
-                  // ORQUESTRA: A ordenação visual do kanban também usa a nova lógica
-                  const leadsDaColuna = leadsFiltrados.filter((l) => (l.status || 'novo') === coluna.id).sort((a, b) => getTempoCronologicoKanban(b) - getTempoCronologicoKanban(a));
+                  const leadsDaColuna = leadsFiltrados
+                    .filter((l) => (l.status || 'novo') === coluna.id)
+                    .sort((a, b) => getTempoCronologicoKanban(b) - getTempoCronologicoKanban(a));
+                  
                   return (
                     <Droppable droppableId={coluna.id} key={coluna.id}>
                       {(provided, snapshot) => (
@@ -738,12 +741,100 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
-        {/* RESTANTE DO CÓDIGO (ANALYTICS, MODALS, DRAWERS) PERMANECE IGUAL */}
+        {/* VIEW 2: PAINEL ANALYTICS */}
         {activeTab === 'analytics' && (
-           <div className="flex-1 flex items-center justify-center p-6 text-slate-500">
-             {/* Mantive omitido aqui para focar no Kanban, mas no seu arquivo original, mantenha o seu bloco de Analytics intacto */}
-             Analytics está no seu arquivo original.
-           </div>
+          <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+            
+            {/* GRÁFICO VETORIAL DE EVOLUÇÃO */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-lg">Volume de Pacientes vs. Agendamentos</h3>
+                  <p className="text-xs text-slate-500">Comparativo do fluxo de entrada de demanda x conversão inicial em agendamentos no período selecionado</p>
+                </div>
+                <div className="flex items-center gap-4 text-xs font-semibold">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full bg-blue-500"></span>
+                    <span className="text-slate-600">Entrada de Leads</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full bg-indigo-500"></span>
+                    <span className="text-slate-600">Agendados (IA)</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="w-full overflow-x-auto">
+                <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-56">
+                  {/* Linhas de Grade e Eixos */}
+                  <line x1={paddingX} y1={paddingY} x2={paddingX} y2={paddingY + plotHeight} stroke="#E2E8F0" strokeWidth="1" />
+                  <line x1={paddingX} y1={paddingY + plotHeight} x2={paddingX + plotWidth} y2={paddingY + plotHeight} stroke="#E2E8F0" strokeWidth="1" />
+                  
+                  {/* Área e Linha de Leads Totais */}
+                  <path d={generateAreaPath(pointsTotal)} fill="rgba(59, 130, 246, 0.08)" />
+                  <path d={generateLinePath(pointsTotal)} fill="none" stroke="#3B82F6" strokeWidth="3" strokeLinecap="round" />
+
+                  {/* Área e Linha de Agendados */}
+                  <path d={generateAreaPath(pointsAgendados)} fill="rgba(99, 102, 241, 0.12)" />
+                  <path d={generateLinePath(pointsAgendados)} fill="none" stroke="#6366F1" strokeWidth="3" strokeLinecap="round" />
+
+                  {/* Pontos de Dados */}
+                  {pointsTotal.map((p, i) => (
+                    <g key={`total-${i}`}>
+                      <circle cx={p.x} cy={p.y} r="4" fill="#3B82F6" className="transition-all hover:r-6" />
+                      <text x={p.x} y={p.y - 8} textAnchor="middle" className="text-[10px] font-bold fill-blue-600">{p.val}</text>
+                      <text x={p.x} y={paddingY + plotHeight + 16} textAnchor="middle" className="text-[10px] font-medium fill-slate-400">{chartBuckets[i]?.label}</text>
+                    </g>
+                  ))}
+
+                  {pointsAgendados.map((p, i) => (
+                    <g key={`agend-${i}`}>
+                      <circle cx={p.x} cy={p.y} r="4" fill="#6366F1" className="transition-all hover:r-6" />
+                      <text x={p.x} y={p.y - 8} textAnchor="middle" className="text-[10px] font-bold fill-indigo-600">{p.val}</text>
+                    </g>
+                  ))}
+                </svg>
+              </div>
+            </div>
+
+            {/* TABELA DE PROCEDIMENTOS */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+              <h3 className="font-bold text-slate-800 text-lg mb-1">Demanda por Procedimento</h3>
+              <p className="text-xs text-slate-500 mb-6">Distribuição dos tratamentos buscados pelos novos pacientes</p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {Object.entries(procsCount).map(([procedimento, quantidade]) => {
+                  const porcentagem = totalLeads > 0 ? ((quantidade / totalLeads) * 100).toFixed(1) : '0.0';
+                  return (
+                    <div key={procedimento} className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 flex flex-col justify-between">
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="text-xs font-bold text-slate-700 line-clamp-1">{procedimento}</span>
+                        <span className="text-xs font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">{quantidade}</span>
+                      </div>
+                      <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                        <div className="bg-blue-600 h-full rounded-full transition-all duration-500" style={{ width: `${porcentagem}%` }} />
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-medium text-right mt-1">{porcentagem}% dos leads</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* VIEW 3: ABA DA AGENDA GOOGLE EMBUTIDA */}
+        {activeTab === 'calendar' && (
+          <div className="flex-1 h-full w-full bg-white p-4">
+            <iframe 
+              src={getGoogleCalendarUrl()} 
+              style={{ border: 0 }} 
+              className="w-full h-full rounded-xl border border-slate-200 shadow-sm"
+              frameBorder="0" 
+              scrolling="no"
+            />
+          </div>
         )}
 
         {/* FICHA DO PACIENTE (GAVETA LATERAL CORRIGIDA) */}
@@ -759,7 +850,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                 <button onClick={() => setLeadDrawer(null)} className="text-slate-400 hover:text-slate-700 text-xl font-light">✕</button>
               </div>
               
-              <div className="p-8 flex-1 overflow-y-auto space-y-6">
+              <div className="p-8 flex-1 overflow-y-auto space-y-6 custom-scrollbar">
                 <div>
                   <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Nome Completo</label>
                   <input type="text" value={leadDrawer.name || ''} onChange={(e) => setLeadDrawer({...leadDrawer, name: e.target.value})} onBlur={(e) => handleUpdateLead('name', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" />
