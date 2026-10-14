@@ -1,3 +1,5 @@
+// File: components/KanbanBoard.tsx
+
 "use client";
 
 import React, { useEffect, useState, useMemo } from 'react';
@@ -215,7 +217,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     if (!error) setLeads(data || []);
   };
 
-  // Blinda o drag para atualizar SOMENTE data_movimentacao (sem tocar em ultima_interacao do Chat)
   const handleDragEnd = async (result: any) => {
     const { destination, source, draggableId } = result;
     if (!destination) return;
@@ -294,7 +295,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     });
   }, [leads, targetUnidade]);
 
-  // Cartões visíveis nas colunas do Kanban
   const leadsVisiveisKanban = useMemo(() => {
     return leadsNaUnidadeGlobal.filter((lead) => {
       if (dateRange === 'all') return true;
@@ -315,15 +315,12 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     });
   }, [leadsVisiveisKanban, searchTerm]);
 
-  // --- BLINDAGEM DAS MÉTRICAS DO FUNIL ---
-  // 1. Novos Leads do Período: Considera estritamente a DATA DE CRIAÇÃO (created_at)
   const leadsCriadosNoPeriodo = useMemo(() => {
     return leadsNaUnidadeGlobal.filter((l) => isWithinDateRange(l.created_at, dateRange, customStart, customEnd));
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
   const totalLeads = leadsCriadosNoPeriodo.length;
 
-  // 2. Agendamentos no Período
   const agendados = useMemo(() => {
     return leadsNaUnidadeGlobal.filter(l => 
       ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status) &&
@@ -345,7 +342,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     ).length;
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
-  // 3. Vendas e Faturamento do Período (baseado estritamente em data_venda)
   const vendasRealizadas = useMemo(() => {
     return leadsNaUnidadeGlobal.filter(l => l.status === 'vendido' && isWithinDateRange(l.data_venda || l.created_at, dateRange, customStart, customEnd));
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
@@ -377,7 +373,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const feedbackAtual = leadDrawer?.feedback || 'Não Informado';
   const opcoesFeedback = OPCOES_FEEDBACK_PADRAO.includes(feedbackAtual) ? OPCOES_FEEDBACK_PADRAO : [feedbackAtual, ...OPCOES_FEEDBACK_PADRAO];
 
-  // Métricas do Gráfico da Aba Analytics
   const procsCount = useMemo(() => {
     const counts: Record<string, number> = {};
     leadsCriadosNoPeriodo.forEach(l => {
@@ -481,7 +476,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           <div className="flex items-center gap-3 flex-wrap">
             <button 
               onClick={() => setIsNewPatientModalOpen(true)} 
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all shadow-sm hover:shadow flex items-center gap-1.5"
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all shadow-sm hover:shadow flex items-center gap-1.5 cursor-pointer"
             >
               <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
               <span>Novo Paciente</span>
@@ -545,9 +540,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         </div>
 
-        {/* LINHA 2: BANNER DE MÉTRICAS DO FUNIL COM DESTAQUE FINANCEIRO */}
+        {/* LINHA 2: BANNER DE MÉTRICAS */}
         <div className="px-6 py-3 bg-slate-50/70 flex items-center justify-between gap-4 overflow-x-auto custom-scrollbar">
-          
           <div className="flex items-center gap-6 md:gap-8 shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-2.5 h-2.5 rounded-full bg-slate-400"></div>
@@ -609,7 +603,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
               </div>
             </div>
 
-            {/* CARD DE FATURAMENTO TOTAL EM R$ */}
             <div className="flex items-center gap-3 pl-4 border-l border-slate-200">
               <div className="w-3 h-3 rounded-full bg-emerald-600 animate-pulse"></div>
               <div>
@@ -628,13 +621,10 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
               <span className="text-lg font-extrabold text-red-600">{totalEstagnados}</span>
             </div>
           </div>
-
         </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden relative">
-        
-        {/* VIEW 1: QUADRO KANBAN */}
         {activeTab === 'kanban' && (
           <div className="flex-1 overflow-x-auto p-6 custom-scrollbar">
             <DragDropContext onDragEnd={handleDragEnd}>
@@ -691,7 +681,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                                         </p>
                                       )}
 
-                                      {/* BADGE DE VALOR DE VENDA NO CARD DO KANBAN COM DATA DA VENDA */}
                                       {lead.valor_venda && Number(lead.valor_venda) > 0 && (
                                         <div className="flex flex-col gap-1.5 mb-2 w-fit">
                                           <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-md">
@@ -741,11 +730,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
-        {/* VIEW 2: PAINEL ANALYTICS */}
         {activeTab === 'analytics' && (
           <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
-            
-            {/* GRÁFICO VETORIAL DE EVOLUÇÃO */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
               <div className="flex justify-between items-center mb-6">
                 <div>
@@ -766,19 +752,15 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
               <div className="w-full overflow-x-auto">
                 <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-56">
-                  {/* Linhas de Grade e Eixos */}
                   <line x1={paddingX} y1={paddingY} x2={paddingX} y2={paddingY + plotHeight} stroke="#E2E8F0" strokeWidth="1" />
                   <line x1={paddingX} y1={paddingY + plotHeight} x2={paddingX + plotWidth} y2={paddingY + plotHeight} stroke="#E2E8F0" strokeWidth="1" />
                   
-                  {/* Área e Linha de Leads Totais */}
                   <path d={generateAreaPath(pointsTotal)} fill="rgba(59, 130, 246, 0.08)" />
                   <path d={generateLinePath(pointsTotal)} fill="none" stroke="#3B82F6" strokeWidth="3" strokeLinecap="round" />
 
-                  {/* Área e Linha de Agendados */}
                   <path d={generateAreaPath(pointsAgendados)} fill="rgba(99, 102, 241, 0.12)" />
                   <path d={generateLinePath(pointsAgendados)} fill="none" stroke="#6366F1" strokeWidth="3" strokeLinecap="round" />
 
-                  {/* Pontos de Dados */}
                   {pointsTotal.map((p, i) => (
                     <g key={`total-${i}`}>
                       <circle cx={p.x} cy={p.y} r="4" fill="#3B82F6" className="transition-all hover:r-6" />
@@ -797,7 +779,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
               </div>
             </div>
 
-            {/* TABELA DE PROCEDIMENTOS */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
               <h3 className="font-bold text-slate-800 text-lg mb-1">Demanda por Procedimento</h3>
               <p className="text-xs text-slate-500 mb-6">Distribuição dos tratamentos buscados pelos novos pacientes</p>
@@ -820,11 +801,9 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                 })}
               </div>
             </div>
-
           </div>
         )}
 
-        {/* VIEW 3: ABA DA AGENDA GOOGLE EMBUTIDA */}
         {activeTab === 'calendar' && (
           <div className="flex-1 h-full w-full bg-white p-4">
             <iframe 
@@ -837,7 +816,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
-        {/* FICHA DO PACIENTE (GAVETA LATERAL CORRIGIDA) */}
+        {/* FICHA DO PACIENTE (GAVETA LATERAL) */}
         {leadDrawer && (
           <>
             <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm z-20" onClick={() => setLeadDrawer(null)} />
@@ -893,7 +872,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <textarea rows={4} value={leadDrawer.notas_internas || ''} onChange={(e) => setLeadDrawer({...leadDrawer, notas_internas: e.target.value})} onBlur={(e) => handleUpdateLead('notas_internas', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 resize-none shadow-sm" placeholder="Observações do atendimento clínico..." />
                 </div>
 
-                {/* BLOCO FINANCEIRO */}
                 <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200/80 space-y-4">
                   <div>
                     <label className="text-xs font-bold text-emerald-800 uppercase block mb-1 flex items-center gap-1.5">
@@ -943,6 +921,134 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
               </div>
             </div>
           </>
+        )}
+
+        {/* MODAL DE CADASTRAR NOVO PACIENTE (INSERIDO E CORRIGIDO) */}
+        {isNewPatientModalOpen && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
+              <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-base">Cadastrar Novo Paciente</h3>
+                  <p className="text-xs text-slate-500">Adicione um novo lead manualmente no CRM</p>
+                </div>
+                <button 
+                  onClick={() => setIsNewPatientModalOpen(false)} 
+                  className="text-slate-400 hover:text-slate-700 text-lg font-light cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleCreatePatient} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">
+                    Nome Completo <span className="text-red-500">*</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="Ex: Maria Silva"
+                    value={newPatientForm.name} 
+                    onChange={(e) => setNewPatientForm({ ...newPatientForm, name: e.target.value })} 
+                    className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">
+                    WhatsApp / Telefone <span className="text-red-500">*</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="Ex: (11) 99999-8888"
+                    value={newPatientForm.phone} 
+                    onChange={(e) => setNewPatientForm({ ...newPatientForm, phone: e.target.value })} 
+                    className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Unidade</label>
+                    <select 
+                      disabled={!isAdmin && userUnidade !== 'Todas' && userUnidade !== 'all'}
+                      value={newPatientForm.unidade} 
+                      onChange={(e) => setNewPatientForm({ ...newPatientForm, unidade: e.target.value })} 
+                      className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer"
+                    >
+                      {LISTA_UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Procedimento</label>
+                    <select 
+                      value={newPatientForm.procedimento} 
+                      onChange={(e) => setNewPatientForm({ ...newPatientForm, procedimento: e.target.value })} 
+                      className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer"
+                    >
+                      {OPCOES_PROCEDIMENTO_PADRAO.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Promotor / Origem</label>
+                    <input 
+                      type="text" 
+                      placeholder="Ex: Passante de Rua"
+                      value={newPatientForm.promotor} 
+                      onChange={(e) => setNewPatientForm({ ...newPatientForm, promotor: e.target.value })} 
+                      className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Valor Venda (R$)</label>
+                    <input 
+                      type="number" 
+                      step="0.01" 
+                      placeholder="Ex: 1500.00"
+                      value={newPatientForm.valor_venda} 
+                      onChange={(e) => setNewPatientForm({ ...newPatientForm, valor_venda: e.target.value })} 
+                      className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Anotações Internas</label>
+                  <textarea 
+                    rows={3} 
+                    placeholder="Observações iniciais do atendimento..."
+                    value={newPatientForm.notas_internas} 
+                    onChange={(e) => setNewPatientForm({ ...newPatientForm, notas_internas: e.target.value })} 
+                    className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 resize-none shadow-sm" 
+                  />
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
+                  <button 
+                    type="button" 
+                    onClick={() => setIsNewPatientModalOpen(false)} 
+                    className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg font-bold text-xs hover:bg-slate-200 transition-colors cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit" 
+                    disabled={savingPatient}
+                    className="px-5 py-2 bg-blue-600 text-white rounded-lg font-bold text-xs hover:bg-blue-700 transition-all shadow-sm flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+                  >
+                    {savingPatient ? 'Salvando...' : 'Cadastrar Paciente'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         )}
       </div>
       
