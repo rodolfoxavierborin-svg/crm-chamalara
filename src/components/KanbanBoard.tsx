@@ -2,11 +2,11 @@
 
 "use client";
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
-// 1. PARSER SEGURO GLOBAL: Vacina anti-NaN para evitar datas inválidas
+// PARSER SEGURO: Vacina anti-NaN
 const parseDataSegura = (dateStr: string | null | undefined): number => {
   if (!dateStr) return 0;
   const safeStr = typeof dateStr === 'string' ? dateStr.trim().replace(' ', 'T') : dateStr;
@@ -46,7 +46,6 @@ const OPCOES_FEEDBACK_PADRAO = [
   'SEM INTERESSE', 'VOU FALAR COM A FAMILIA', 'SEM DINHEIRO'
 ];
 
-// Motor de tempo exclusivo do Kanban (Usa data_movimentacao ou created_at)
 const getTempoCronologicoKanban = (lead: any) => {
   const timeMovimentacao = parseDataSegura(lead.data_movimentacao);
   if (timeMovimentacao > 0) return timeMovimentacao;
@@ -124,55 +123,41 @@ const formatarMoeda = (val?: number | string | null): string => {
   return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
-const isWithinDateRange = (dateStr: string | null | undefined, range: string, customStart?: string, customEnd?: string) => {
-  if (range === 'all') return true;
-  const leadTime = parseDataSegura(dateStr);
-  if (leadTime === 0) return false;
-
+// ⚙️ MOTOR DE FUSO HORÁRIO E LIMITES (O SEGREDO DA PRECISÃO)
+const getIsoDateBounds = (range: string, customStart?: string, customEnd?: string) => {
   const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
-  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
-
-  if (range === 'today') return leadTime >= todayStart && leadTime <= todayEnd;
-
-  if (range === 'yesterday') {
-    const yStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0).getTime();
-    const yEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999).getTime();
-    return leadTime >= yStart && leadTime <= yEnd;
-  }
-
-  if (range === 'last_7') {
-    const sevenDaysAgoStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0, 0).getTime();
-    return leadTime >= sevenDaysAgoStart && leadTime <= todayEnd;
-  }
-
-  if (range === 'last_30') {
-    const thirtyDaysAgoStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29, 0, 0, 0, 0).getTime();
-    return leadTime >= thirtyDaysAgoStart && leadTime <= todayEnd;
-  }
+  let start = new Date(0); // Epoch start
+  let end = new Date(8640000000000000); // Epoch max
 
   if (range === 'this_month') {
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
-    return leadTime >= monthStart && leadTime <= monthEnd;
-  }
-
-  if (range === 'custom') {
-    let startValid = true, endValid = true;
+    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  } else if (range === 'today') {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  } else if (range === 'yesterday') {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999);
+  } else if (range === 'last_7') {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  } else if (range === 'custom') {
     if (customStart) {
       const [y, m, d] = customStart.split('-').map(Number);
-      const s = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
-      startValid = leadTime >= s;
+      start = new Date(y, m - 1, d, 0, 0, 0, 0);
     }
     if (customEnd) {
       const [y, m, d] = customEnd.split('-').map(Number);
-      const e = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
-      endValid = leadTime <= e;
+      end = new Date(y, m - 1, d, 23, 59, 59, 999);
     }
-    return startValid && endValid;
   }
 
-  return true;
+  return {
+    startIso: start.toISOString(),
+    endIso: end.toISOString(),
+    startMs: start.getTime(),
+    endMs: end.getTime()
+  };
 };
 
 export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLead?: (lead: any) => void; userProfile?: any }) {
@@ -186,6 +171,16 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const [unidadeFilter, setUnidadeFilter] = useState('all');
   const [activeTab, setActiveTab] = useState<'kanban' | 'analytics' | 'calendar'>('kanban');
 
+  // ESTADO DA BANNER (A Única Fonte da Verdade)
+  const [dbMetrics, setDbMetrics] = useState({
+    total_leads: 0,
+    agendados: 0,
+    confirmados: 0,
+    compareceram: 0,
+    vendidos: 0,
+    faturamento_total: 0
+  });
+
   const [isNewPatientModalOpen, setIsNewPatientModalOpen] = useState(false);
   const [savingPatient, setSavingPatient] = useState(false);
   const [newPatientForm, setNewPatientForm] = useState({
@@ -195,6 +190,28 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const cargoNormalized = userProfile?.cargo?.toLowerCase().trim() || '';
   const isAdmin = cargoNormalized === 'admin' || cargoNormalized === 'administrador' || cargoNormalized === 'administrador geral';
   const userUnidade = userProfile?.unidade || 'all';
+  const targetUnidade = (!isAdmin && userUnidade && userUnidade !== 'Todas' && userUnidade !== 'all') ? userUnidade : unidadeFilter;
+
+  // FETCH DAS MÉTRICAS DIRETAMENTE DA RPC
+  const fetchDbMetrics = useCallback(async () => {
+    const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
+    const { data, error } = await supabase.rpc('get_kanban_metrics', {
+      p_unidade: targetUnidade,
+      p_start_date: dateRange === 'all' ? '2000-01-01T00:00:00Z' : bounds.startIso,
+      p_end_date: dateRange === 'all' ? '2100-01-01T23:59:59Z' : bounds.endIso
+    });
+
+    if (!error && data && data.length > 0) {
+      setDbMetrics({
+        total_leads: Number(data[0].total_leads) || 0,
+        agendados: Number(data[0].agendados) || 0,
+        confirmados: Number(data[0].confirmados) || 0,
+        compareceram: Number(data[0].compareceram) || 0,
+        vendidos: Number(data[0].vendidos) || 0,
+        faturamento_total: Number(data[0].faturamento_total) || 0
+      });
+    }
+  }, [dateRange, customStart, customEnd, targetUnidade]);
 
   useEffect(() => {
     if (!isAdmin && userUnidade && userUnidade !== 'Todas' && userUnidade !== 'all') {
@@ -206,17 +223,23 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   useEffect(() => {
     setIsBrowser(true);
     fetchLeads();
+    fetchDbMetrics();
+
     const channel = supabase.channel('kanban-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_leads' }, () => fetchLeads())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_leads' }, () => {
+        fetchLeads();
+        fetchDbMetrics();
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  }, [fetchDbMetrics]);
 
   const fetchLeads = async () => {
     const { data, error } = await supabase.from('dentup_leads').select('*');
     if (!error) setLeads(data || []);
   };
 
+  // ARRRASTAR E SOLTAR (Atualiza a Data Exata Automaticamente)
   const handleDragEnd = async (result: any) => {
     const { destination, source, draggableId } = result;
     if (!destination) return;
@@ -232,13 +255,12 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
     if (newStatus === 'vendido') {
       const leadEncontrado = leads.find(l => l.id === draggableId);
-      if (leadEncontrado && !leadEncontrado.data_venda) {
-        updates.data_venda = agoraISO;
-      }
+      if (leadEncontrado && !leadEncontrado.data_venda) updates.data_venda = agoraISO;
     }
 
     setLeads((prev) => prev.map((l) => (l.id === draggableId ? { ...l, ...updates } : l)));
     await supabase.from('dentup_leads').update(updates).eq('id', draggableId);
+    fetchDbMetrics();
   };
 
   const handleUpdateLead = async (campo: string, valor: any) => {
@@ -247,6 +269,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     setLeadDrawer(updatedDrawer);
     setLeads((prev) => prev.map((l) => (l.id === leadDrawer.id ? { ...l, [campo]: valor } : l)));
     await supabase.from('dentup_leads').update({ [campo]: valor }).eq('id', leadDrawer.id);
+    fetchDbMetrics();
   };
 
   const handleCreatePatient = async (e: React.FormEvent) => {
@@ -275,18 +298,18 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     setSavingPatient(false);
 
     if (error) {
-      alert('Erro ao cadastrar paciente: ' + error.message);
+      alert('Erro ao cadastrar: ' + error.message);
     } else {
       setIsNewPatientModalOpen(false);
       setNewPatientForm({
         name: '', phone: '', unidade: !isAdmin && userUnidade !== 'all' ? userUnidade : 'Santo André', procedimento: 'Avaliação Geral', promotor: 'Passante de Rua', notas_internas: '', valor_venda: ''
       });
       fetchLeads();
+      fetchDbMetrics();
     }
   };
 
-  const targetUnidade = (!isAdmin && userUnidade && userUnidade !== 'Todas' && userUnidade !== 'all') ? userUnidade : unidadeFilter;
-  
+  // FILTRAGEM VISUAL DO KANBAN (Sincronizado com os Bounds do Banner)
   const leadsNaUnidadeGlobal = useMemo(() => {
     return leads.filter((lead) => {
       if (targetUnidade === 'all' || targetUnidade === 'Todas') return true;
@@ -296,67 +319,40 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   }, [leads, targetUnidade]);
 
   const leadsVisiveisKanban = useMemo(() => {
+    if (dateRange === 'all') return leadsNaUnidadeGlobal;
+    const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
+    
     return leadsNaUnidadeGlobal.filter((lead) => {
-      if (dateRange === 'all') return true;
-      const interacao = isWithinDateRange(lead.ultima_interacao || lead['última_interação'], dateRange, customStart, customEnd);
-      const criacao = isWithinDateRange(lead.created_at, dateRange, customStart, customEnd);
-      const agendamento = isWithinDateRange(lead.data_agendamento, dateRange, customStart, customEnd);
-      const venda = isWithinDateRange(lead.data_venda, dateRange, customStart, customEnd);
-      const movimentacao = isWithinDateRange(lead.data_movimentacao, dateRange, customStart, customEnd);
-      return interacao || criacao || agendamento || venda || movimentacao;
+      // Se QUALQUER data pertinente estiver no período, o card deve aparecer na tela para alinhar com o número do banner.
+      const dates = [
+        parseDataSegura(lead.created_at),
+        parseDataSegura(lead.data_agendamento),
+        parseDataSegura(lead.data_venda),
+        parseDataSegura(lead.data_movimentacao),
+        parseDataSegura(lead.ultima_interacao || lead['última_interação'])
+      ];
+      return dates.some(timeMs => timeMs >= bounds.startMs && timeMs <= bounds.endMs);
     });
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
   const leadsFiltrados = useMemo(() => {
     const termo = searchTerm.toLowerCase().trim();
     if (!termo) return leadsVisiveisKanban;
-    return leadsVisiveisKanban.filter((lead) => {
-      return (lead.name || '').toLowerCase().includes(termo) || (lead.phone || lead.phone_number || '').toLowerCase().includes(termo);
-    });
+    return leadsVisiveisKanban.filter((lead) => 
+      (lead.name || '').toLowerCase().includes(termo) || 
+      (lead.phone || lead.phone_number || '').toLowerCase().includes(termo)
+    );
   }, [leadsVisiveisKanban, searchTerm]);
 
-  const leadsCriadosNoPeriodo = useMemo(() => {
-    return leadsNaUnidadeGlobal.filter((l) => isWithinDateRange(l.created_at, dateRange, customStart, customEnd));
-  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
-
-  const totalLeads = leadsCriadosNoPeriodo.length;
-
-  const agendados = useMemo(() => {
-    return leadsNaUnidadeGlobal.filter(l => 
-      ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status) &&
-      isWithinDateRange(l.data_agendamento || l.created_at, dateRange, customStart, customEnd)
-    ).length;
-  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
-
-  const confirmados = useMemo(() => {
-    return leadsNaUnidadeGlobal.filter(l => 
-      ['confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status) &&
-      isWithinDateRange(l.data_agendamento || l.created_at, dateRange, customStart, customEnd)
-    ).length;
-  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
-
-  const compareceram = useMemo(() => {
-    return leadsNaUnidadeGlobal.filter(l => 
-      ['na_clinica', 'vendido', 'nao_vendido'].includes(l.status) &&
-      isWithinDateRange(l.data_agendamento || l.created_at, dateRange, customStart, customEnd)
-    ).length;
-  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
-
-  const vendasRealizadas = useMemo(() => {
-    return leadsNaUnidadeGlobal.filter(l => l.status === 'vendido' && isWithinDateRange(l.data_venda || l.created_at, dateRange, customStart, customEnd));
-  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
-
-  const vendidos = vendasRealizadas.length;
-  const faturamentoTotal = useMemo(() => vendasRealizadas.reduce((acc, l) => acc + (Number(l.valor_venda) || 0), 0), [vendasRealizadas]);
+  // CÁLCULO DAS TAXAS BASEADO NA VERDADE DO SUPABASE
+  const taxaAgendamento = dbMetrics.total_leads > 0 ? ((dbMetrics.agendados / dbMetrics.total_leads) * 100).toFixed(1) : '0.0';
+  const taxaConfirmacao = dbMetrics.agendados > 0 ? ((dbMetrics.confirmados / dbMetrics.agendados) * 100).toFixed(1) : '0.0';
+  const taxaComparecimento = dbMetrics.confirmados > 0 ? ((dbMetrics.compareceram / dbMetrics.confirmados) * 100).toFixed(1) : '0.0';
+  const taxaFechamento = dbMetrics.compareceram > 0 ? ((dbMetrics.vendidos / dbMetrics.compareceram) * 100).toFixed(1) : '0.0';
 
   const totalEstagnados = useMemo(() => {
     return leadsNaUnidadeGlobal.filter(l => getHorasParado(l) >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(l.status)).length;
   }, [leadsNaUnidadeGlobal]);
-
-  const taxaAgendamento = totalLeads > 0 ? ((agendados / totalLeads) * 100).toFixed(1) : '0.0';
-  const taxaConfirmacao = agendados > 0 ? ((confirmados / agendados) * 100).toFixed(1) : '0.0';
-  const taxaComparecimento = confirmados > 0 ? ((compareceram / confirmados) * 100).toFixed(1) : '0.0';
-  const taxaFechamento = compareceram > 0 ? ((vendidos / compareceram) * 100).toFixed(1) : '0.0';
 
   const getGoogleCalendarUrl = () => {
     const baseUrl = "https://calendar.google.com/calendar/embed?ctz=America%2FSao_Paulo&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=1&showTz=0&mode=WEEK";
@@ -373,132 +369,58 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const feedbackAtual = leadDrawer?.feedback || 'Não Informado';
   const opcoesFeedback = OPCOES_FEEDBACK_PADRAO.includes(feedbackAtual) ? OPCOES_FEEDBACK_PADRAO : [feedbackAtual, ...OPCOES_FEEDBACK_PADRAO];
 
+  // ANALYTICS BLINDADO
   const procsCount = useMemo(() => {
     const counts: Record<string, number> = {};
-    leadsCriadosNoPeriodo.forEach(l => {
+    const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
+    leadsNaUnidadeGlobal.filter(l => {
+      const ms = parseDataSegura(l.created_at);
+      return dateRange === 'all' || (ms >= bounds.startMs && ms <= bounds.endMs);
+    }).forEach(l => {
       const p = l.procedimento || 'Não Informado';
       counts[p] = (counts[p] || 0) + 1;
     });
     return counts;
-  }, [leadsCriadosNoPeriodo]);
-
-  const chartBuckets = useMemo(() => {
-    const now = new Date();
-    const buckets: { label: string; total: number; agendados: number }[] = [];
-    if (dateRange === 'today') {
-      const horas = [8, 10, 12, 14, 16, 18, 20];
-      horas.forEach((h) => {
-        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h - 2, 0, 0).getTime();
-        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, 0, 0).getTime();
-        const label = `${h.toString().padStart(2, '0')}:00`;
-        const leadsNoIntervalo = leadsNaUnidadeGlobal.filter((l) => {
-          const t = parseDataSegura(l.created_at);
-          return t >= start && t < end;
-        });
-        const agendadosNoIntervalo = leadsNoIntervalo.filter((l) => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status));
-        buckets.push({ label, total: leadsNoIntervalo.length, agendados: agendadosNoIntervalo.length });
-      });
-    } else {
-      const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(now.getDate() - i);
-        const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).getTime();
-        const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).getTime();
-        const label = i === 0 ? 'Hoje' : `${diasSemana[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
-        const leadsNoDia = leadsNaUnidadeGlobal.filter((l) => {
-          const t = parseDataSegura(l.created_at);
-          return t >= start && t <= end;
-        });
-        const agendadosNoDia = leadsNoDia.filter((l) => ['agendado', 'confirmado', 'na_clinica', 'vendido', 'nao_vendido', 'no_show'].includes(l.status));
-        buckets.push({ label, total: leadsNoDia.length, agendados: agendadosNoDia.length });
-      }
-    }
-    return buckets;
-  }, [dateRange, leadsNaUnidadeGlobal]);
-
-  const svgWidth = 600, svgHeight = 200, paddingX = 40, paddingY = 30;
-  const plotWidth = svgWidth - paddingX * 2, plotHeight = svgHeight - paddingY * 2;
-  const maxVal = useMemo(() => Math.max(...chartBuckets.map((b) => b.total), 5), [chartBuckets]);
-  
-  const pointsTotal = useMemo(() => chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / Math.max(chartBuckets.length - 1, 1)), y: paddingY + plotHeight - (b.total / maxVal) * plotHeight, val: b.total })), [chartBuckets, maxVal, plotWidth, plotHeight]);
-  const pointsAgendados = useMemo(() => chartBuckets.map((b, idx) => ({ x: paddingX + idx * (plotWidth / Math.max(chartBuckets.length - 1, 1)), y: paddingY + plotHeight - (b.agendados / maxVal) * plotHeight, val: b.agendados })), [chartBuckets, maxVal, plotWidth, plotHeight]);
-  
-  const generateLinePath = (pts: { x: number; y: number }[]) => pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
-  const generateAreaPath = (pts: { x: number; y: number }[]) => {
-    if (pts.length === 0) return '';
-    const line = generateLinePath(pts);
-    const lastX = pts[pts.length - 1].x.toFixed(1), firstX = pts[0].x.toFixed(1), bottomY = (paddingY + plotHeight).toFixed(1);
-    return `${line} L ${lastX} ${bottomY} L ${firstX} ${bottomY} Z`;
-  };
+  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
   if (!isBrowser) return null;
 
   return (
     <div className="flex flex-col h-full bg-[#F8FAFC] text-slate-800 font-sans">
       
-      {/* HEADER EM DUAS CAMADAS */}
       <div className="bg-white border-b border-slate-200/80 z-10 sticky top-0 shadow-sm">
         
-        {/* LINHA 1: NAVEGAÇÃO E AÇÕES */}
         <div className="px-6 py-3 flex items-center justify-between border-b border-slate-100 gap-4 flex-wrap">
           
           <div className="flex bg-slate-100/80 p-1 rounded-xl border border-slate-200/60">
-            <button 
-              onClick={() => setActiveTab('kanban')} 
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                activeTab === 'kanban' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
+            <button onClick={() => setActiveTab('kanban')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'kanban' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" /></svg>
               <span>Quadro CRM</span>
             </button>
-            <button 
-              onClick={() => setActiveTab('analytics')} 
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                activeTab === 'analytics' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
+            <button onClick={() => setActiveTab('analytics')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'analytics' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
               <span>Analytics</span>
             </button>
-            <button 
-              onClick={() => setActiveTab('calendar')} 
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                activeTab === 'calendar' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
+            <button onClick={() => setActiveTab('calendar')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'calendar' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
               <span>Agenda</span>
             </button>
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
-            <button 
-              onClick={() => setIsNewPatientModalOpen(true)} 
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all shadow-sm hover:shadow flex items-center gap-1.5 cursor-pointer"
-            >
+            <button onClick={() => setIsNewPatientModalOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all shadow-sm hover:shadow flex items-center gap-1.5 cursor-pointer">
               <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
               <span>Novo Paciente</span>
             </button>
 
-            <select 
-              disabled={!isAdmin && userUnidade !== 'Todas' && userUnidade !== 'all'} 
-              value={targetUnidade} 
-              onChange={(e) => setUnidadeFilter(e.target.value)} 
-              className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-semibold outline-none focus:border-blue-500 cursor-pointer"
-            >
+            <select disabled={!isAdmin && userUnidade !== 'Todas' && userUnidade !== 'all'} value={targetUnidade} onChange={(e) => setUnidadeFilter(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-semibold outline-none focus:border-blue-500 cursor-pointer">
               <option value="all">Todas as Unidades</option>
               {LISTA_UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
 
             {activeTab !== 'calendar' && (
               <div className="flex items-center gap-2 flex-wrap">
-                <select 
-                  value={dateRange} 
-                  onChange={(e) => setDateRange(e.target.value)} 
-                  className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium outline-none focus:border-blue-500 cursor-pointer"
-                >
+                <select value={dateRange} onChange={(e) => setDateRange(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium outline-none focus:border-blue-500 cursor-pointer">
                   <option value="this_month">Este Mês</option>
                   <option value="today">Hoje</option>
                   <option value="yesterday">Ontem</option>
@@ -509,30 +431,14 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
                 {dateRange === 'custom' && (
                   <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-lg border border-slate-200/80">
-                    <input 
-                      type="date" 
-                      value={customStart} 
-                      onChange={(e) => setCustomStart(e.target.value)} 
-                      className="bg-white border border-slate-200 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 cursor-pointer shadow-sm"
-                    />
+                    <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="bg-white border border-slate-200 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 cursor-pointer shadow-sm" />
                     <span className="text-[11px] font-bold text-slate-400">até</span>
-                    <input 
-                      type="date" 
-                      value={customEnd} 
-                      onChange={(e) => setCustomEnd(e.target.value)} 
-                      className="bg-white border border-slate-200 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 cursor-pointer shadow-sm"
-                    />
+                    <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="bg-white border border-slate-200 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 cursor-pointer shadow-sm" />
                   </div>
                 )}
 
                 <div className="relative">
-                  <input 
-                    type="text" 
-                    placeholder="Buscar paciente..." 
-                    value={searchTerm} 
-                    onChange={(e) => setSearchTerm(e.target.value)} 
-                    className="bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500 w-44 shadow-inner" 
-                  />
+                  <input type="text" placeholder="Buscar paciente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500 w-44 shadow-inner" />
                   <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                 </div>
               </div>
@@ -540,14 +446,14 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         </div>
 
-        {/* LINHA 2: BANNER DE MÉTRICAS */}
+        {/* 📊 BANNER DE MÉTRICAS (Alimentado pelo Banco de Dados) */}
         <div className="px-6 py-3 bg-slate-50/70 flex items-center justify-between gap-4 overflow-x-auto custom-scrollbar">
           <div className="flex items-center gap-6 md:gap-8 shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-2.5 h-2.5 rounded-full bg-slate-400"></div>
               <div>
                 <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Leads Totais</span>
-                <span className="text-xl md:text-2xl font-black text-slate-800 leading-tight">{totalLeads}</span>
+                <span className="text-xl md:text-2xl font-black text-slate-800 leading-tight">{dbMetrics.total_leads}</span>
               </div>
             </div>
 
@@ -560,7 +466,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">Agendados (IA)</span>
                   <span className="text-[10px] font-extrabold bg-indigo-100 text-indigo-700 px-1.5 py-0.2 rounded-full">{taxaAgendamento}%</span>
                 </div>
-                <span className="text-xl md:text-2xl font-black text-indigo-600 leading-tight">{agendados}</span>
+                <span className="text-xl md:text-2xl font-black text-indigo-600 leading-tight">{dbMetrics.agendados}</span>
               </div>
             </div>
 
@@ -573,7 +479,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Confirmados</span>
                   <span className="text-[10px] font-extrabold bg-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded-full">{taxaConfirmacao}%</span>
                 </div>
-                <span className="text-xl md:text-2xl font-black text-emerald-600 leading-tight">{confirmados}</span>
+                <span className="text-xl md:text-2xl font-black text-emerald-600 leading-tight">{dbMetrics.confirmados}</span>
               </div>
             </div>
 
@@ -586,7 +492,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Na Clínica</span>
                   <span className="text-[10px] font-extrabold bg-amber-100 text-amber-700 px-1.5 py-0.2 rounded-full">{taxaComparecimento}%</span>
                 </div>
-                <span className="text-xl md:text-2xl font-black text-amber-600 leading-tight">{compareceram}</span>
+                <span className="text-xl md:text-2xl font-black text-amber-600 leading-tight">{dbMetrics.compareceram}</span>
               </div>
             </div>
 
@@ -599,15 +505,15 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <span className="text-[10px] font-bold text-teal-600 uppercase tracking-wider">Vendas Fechadas</span>
                   <span className="text-[10px] font-extrabold bg-teal-100 text-teal-700 px-1.5 py-0.2 rounded-full">{taxaFechamento}%</span>
                 </div>
-                <span className="text-xl md:text-2xl font-black text-teal-600 leading-tight">{vendidos}</span>
+                <span className="text-xl md:text-2xl font-black text-teal-600 leading-tight">{dbMetrics.vendidos}</span>
               </div>
             </div>
 
             <div className="flex items-center gap-3 pl-4 border-l border-slate-200">
               <div className="w-3 h-3 rounded-full bg-emerald-600 animate-pulse"></div>
               <div>
-                <span className="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Faturamento Total</span>
-                <span className="text-xl md:text-2xl font-black text-emerald-600 leading-tight">{formatarMoeda(faturamentoTotal)}</span>
+                <span className="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Faturamento</span>
+                <span className="text-xl md:text-2xl font-black text-emerald-600 leading-tight">{formatarMoeda(dbMetrics.faturamento_total)}</span>
               </div>
             </div>
           </div>
@@ -733,59 +639,12 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
         {activeTab === 'analytics' && (
           <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
-              <div className="flex justify-between items-center mb-6">
-                <div>
-                  <h3 className="font-bold text-slate-800 text-lg">Volume de Pacientes vs. Agendamentos</h3>
-                  <p className="text-xs text-slate-500">Comparativo do fluxo de entrada de demanda x conversão inicial em agendamentos no período selecionado</p>
-                </div>
-                <div className="flex items-center gap-4 text-xs font-semibold">
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full bg-blue-500"></span>
-                    <span className="text-slate-600">Entrada de Leads</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full bg-indigo-500"></span>
-                    <span className="text-slate-600">Agendados (IA)</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="w-full overflow-x-auto">
-                <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-56">
-                  <line x1={paddingX} y1={paddingY} x2={paddingX} y2={paddingY + plotHeight} stroke="#E2E8F0" strokeWidth="1" />
-                  <line x1={paddingX} y1={paddingY + plotHeight} x2={paddingX + plotWidth} y2={paddingY + plotHeight} stroke="#E2E8F0" strokeWidth="1" />
-                  
-                  <path d={generateAreaPath(pointsTotal)} fill="rgba(59, 130, 246, 0.08)" />
-                  <path d={generateLinePath(pointsTotal)} fill="none" stroke="#3B82F6" strokeWidth="3" strokeLinecap="round" />
-
-                  <path d={generateAreaPath(pointsAgendados)} fill="rgba(99, 102, 241, 0.12)" />
-                  <path d={generateLinePath(pointsAgendados)} fill="none" stroke="#6366F1" strokeWidth="3" strokeLinecap="round" />
-
-                  {pointsTotal.map((p, i) => (
-                    <g key={`total-${i}`}>
-                      <circle cx={p.x} cy={p.y} r="4" fill="#3B82F6" className="transition-all hover:r-6" />
-                      <text x={p.x} y={p.y - 8} textAnchor="middle" className="text-[10px] font-bold fill-blue-600">{p.val}</text>
-                      <text x={p.x} y={paddingY + plotHeight + 16} textAnchor="middle" className="text-[10px] font-medium fill-slate-400">{chartBuckets[i]?.label}</text>
-                    </g>
-                  ))}
-
-                  {pointsAgendados.map((p, i) => (
-                    <g key={`agend-${i}`}>
-                      <circle cx={p.x} cy={p.y} r="4" fill="#6366F1" className="transition-all hover:r-6" />
-                      <text x={p.x} y={p.y - 8} textAnchor="middle" className="text-[10px] font-bold fill-indigo-600">{p.val}</text>
-                    </g>
-                  ))}
-                </svg>
-              </div>
-            </div>
-
-            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
               <h3 className="font-bold text-slate-800 text-lg mb-1">Demanda por Procedimento</h3>
               <p className="text-xs text-slate-500 mb-6">Distribuição dos tratamentos buscados pelos novos pacientes</p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {Object.entries(procsCount).map(([procedimento, quantidade]) => {
-                  const porcentagem = totalLeads > 0 ? ((quantidade / totalLeads) * 100).toFixed(1) : '0.0';
+                  const porcentagem = dbMetrics.total_leads > 0 ? ((quantidade / dbMetrics.total_leads) * 100).toFixed(1) : '0.0';
                   return (
                     <div key={procedimento} className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 flex flex-col justify-between">
                       <div className="flex justify-between items-start mb-2">
@@ -816,7 +675,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
-        {/* FICHA DO PACIENTE (GAVETA LATERAL) */}
+        {/* 🗂️ FICHA DO PACIENTE (GAVETA LATERAL) */}
         {leadDrawer && (
           <>
             <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm z-20" onClick={() => setLeadDrawer(null)} />
@@ -923,7 +782,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </>
         )}
 
-        {/* MODAL DE CADASTRAR NOVO PACIENTE (INSERIDO E CORRIGIDO) */}
+        {/* 🆕 MODAL DE CADASTRAR NOVO PACIENTE */}
         {isNewPatientModalOpen && (
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
@@ -932,63 +791,30 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <h3 className="font-bold text-slate-800 text-base">Cadastrar Novo Paciente</h3>
                   <p className="text-xs text-slate-500">Adicione um novo lead manualmente no CRM</p>
                 </div>
-                <button 
-                  onClick={() => setIsNewPatientModalOpen(false)} 
-                  className="text-slate-400 hover:text-slate-700 text-lg font-light cursor-pointer"
-                >
-                  ✕
-                </button>
+                <button onClick={() => setIsNewPatientModalOpen(false)} className="text-slate-400 hover:text-slate-700 text-lg font-light cursor-pointer">✕</button>
               </div>
 
               <form onSubmit={handleCreatePatient} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">
-                    Nome Completo <span className="text-red-500">*</span>
-                  </label>
-                  <input 
-                    type="text" 
-                    required
-                    placeholder="Ex: Maria Silva"
-                    value={newPatientForm.name} 
-                    onChange={(e) => setNewPatientForm({ ...newPatientForm, name: e.target.value })} 
-                    className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
-                  />
+                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Nome Completo <span className="text-red-500">*</span></label>
+                  <input type="text" required placeholder="Ex: Maria Silva" value={newPatientForm.name} onChange={(e) => setNewPatientForm({ ...newPatientForm, name: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" />
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">
-                    WhatsApp / Telefone <span className="text-red-500">*</span>
-                  </label>
-                  <input 
-                    type="text" 
-                    required
-                    placeholder="Ex: (11) 99999-8888"
-                    value={newPatientForm.phone} 
-                    onChange={(e) => setNewPatientForm({ ...newPatientForm, phone: e.target.value })} 
-                    className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
-                  />
+                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">WhatsApp / Telefone <span className="text-red-500">*</span></label>
+                  <input type="text" required placeholder="Ex: (11) 99999-8888" value={newPatientForm.phone} onChange={(e) => setNewPatientForm({ ...newPatientForm, phone: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Unidade</label>
-                    <select 
-                      disabled={!isAdmin && userUnidade !== 'Todas' && userUnidade !== 'all'}
-                      value={newPatientForm.unidade} 
-                      onChange={(e) => setNewPatientForm({ ...newPatientForm, unidade: e.target.value })} 
-                      className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer"
-                    >
+                    <select disabled={!isAdmin && userUnidade !== 'Todas' && userUnidade !== 'all'} value={newPatientForm.unidade} onChange={(e) => setNewPatientForm({ ...newPatientForm, unidade: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer">
                       {LISTA_UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
                     </select>
                   </div>
-
                   <div>
                     <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Procedimento</label>
-                    <select 
-                      value={newPatientForm.procedimento} 
-                      onChange={(e) => setNewPatientForm({ ...newPatientForm, procedimento: e.target.value })} 
-                      className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer"
-                    >
+                    <select value={newPatientForm.procedimento} onChange={(e) => setNewPatientForm({ ...newPatientForm, procedimento: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer">
                       {OPCOES_PROCEDIMENTO_PADRAO.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                   </div>
@@ -997,52 +823,24 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Promotor / Origem</label>
-                    <input 
-                      type="text" 
-                      placeholder="Ex: Passante de Rua"
-                      value={newPatientForm.promotor} 
-                      onChange={(e) => setNewPatientForm({ ...newPatientForm, promotor: e.target.value })} 
-                      className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
-                    />
+                    <input type="text" placeholder="Ex: Passante de Rua" value={newPatientForm.promotor} onChange={(e) => setNewPatientForm({ ...newPatientForm, promotor: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" />
                   </div>
-
                   <div>
                     <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Valor Venda (R$)</label>
-                    <input 
-                      type="number" 
-                      step="0.01" 
-                      placeholder="Ex: 1500.00"
-                      value={newPatientForm.valor_venda} 
-                      onChange={(e) => setNewPatientForm({ ...newPatientForm, valor_venda: e.target.value })} 
-                      className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
-                    />
+                    <input type="number" step="0.01" placeholder="Ex: 1500.00" value={newPatientForm.valor_venda} onChange={(e) => setNewPatientForm({ ...newPatientForm, valor_venda: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" />
                   </div>
                 </div>
 
                 <div>
                   <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Anotações Internas</label>
-                  <textarea 
-                    rows={3} 
-                    placeholder="Observações iniciais do atendimento..."
-                    value={newPatientForm.notas_internas} 
-                    onChange={(e) => setNewPatientForm({ ...newPatientForm, notas_internas: e.target.value })} 
-                    className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 resize-none shadow-sm" 
-                  />
+                  <textarea rows={3} placeholder="Observações iniciais do atendimento..." value={newPatientForm.notas_internas} onChange={(e) => setNewPatientForm({ ...newPatientForm, notas_internas: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 resize-none shadow-sm" />
                 </div>
 
                 <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
-                  <button 
-                    type="button" 
-                    onClick={() => setIsNewPatientModalOpen(false)} 
-                    className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg font-bold text-xs hover:bg-slate-200 transition-colors cursor-pointer"
-                  >
+                  <button type="button" onClick={() => setIsNewPatientModalOpen(false)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg font-bold text-xs hover:bg-slate-200 transition-colors cursor-pointer">
                     Cancelar
                   </button>
-                  <button 
-                    type="submit" 
-                    disabled={savingPatient}
-                    className="px-5 py-2 bg-blue-600 text-white rounded-lg font-bold text-xs hover:bg-blue-700 transition-all shadow-sm flex items-center gap-2 disabled:opacity-50 cursor-pointer"
-                  >
+                  <button type="submit" disabled={savingPatient} className="px-5 py-2 bg-blue-600 text-white rounded-lg font-bold text-xs hover:bg-blue-700 transition-all shadow-sm flex items-center gap-2 disabled:opacity-50 cursor-pointer">
                     {savingPatient ? 'Salvando...' : 'Cadastrar Paciente'}
                   </button>
                 </div>
