@@ -1,56 +1,79 @@
 // File: src/utils/dateUtils.ts
 
 /**
- * Converte qualquer string de data do Postgres/Supabase em timestamp em milissegundos
- * com tratamento seguro para Chrome, Safari e WebViews.
+ * Converte qualquer formato de data do Supabase (timestamptz UTC +00)
+ * para Timestamp em milissegundos de forma 100% determinística.
  */
-export const parseDataSegura = (dateStr: string | null | undefined): number => {
-  if (!dateStr) return 0;
-  const safeStr = typeof dateStr === 'string' ? dateStr.trim().replace(' ', 'T') : dateStr;
-  const time = new Date(safeStr).getTime();
-  return isNaN(time) ? 0 : time;
+export const parseDataSegura = (dataInput: any): number => {
+  if (!dataInput) return 0;
+
+  try {
+    if (dataInput instanceof Date) {
+      const ms = dataInput.getTime();
+      return isNaN(ms) ? 0 : ms;
+    }
+
+    if (typeof dataInput === 'number') {
+      return isNaN(dataInput) ? 0 : dataInput;
+    }
+
+    if (typeof dataInput === 'string') {
+      const cleanStr = dataInput.trim();
+      if (!cleanStr) return 0;
+
+      const parsed = new Date(cleanStr).getTime();
+      return isNaN(parsed) ? 0 : parsed;
+    }
+  } catch (e) {
+    return 0;
+  }
+
+  return 0;
 };
 
 /**
- * Obtém a data/hora da última interação do lead
+ * Retorna o timestamp em ms da última interação do lead
+ * Coluna oficial do banco: ultima_interacao
  */
 export const getUltimaInteracao = (lead: any): number => {
-  const rawDate = lead['última_interação'] || lead.ultima_interacao || lead.created_at;
+  if (!lead) return 0;
+  const rawDate = lead.ultima_interacao || lead.created_at;
   return parseDataSegura(rawDate);
 };
 
 /**
- * Formata horários no padrão do WhatsApp (Ex: "14:30", "Ontem", "27/10/26")
+ * Formata o horário do WhatsApp considerando o fuso oficial de Brasília (America/Sao_Paulo)
  */
 export const formatarHorarioWhatsApp = (dataIso: string | null): string => {
-  if (!dataIso) return '';
-  const ms = getUltimaInteracao({ ultima_interacao: dataIso });
+  const ms = parseDataSegura(dataIso);
   if (ms === 0) return '';
 
-  const data = new Date(ms);
-  const hoje = new Date();
-  const ontem = new Date();
-  ontem.setDate(hoje.getDate() - 1);
+  const dataMs = new Date(ms);
 
-  if (data.toDateString() === hoje.toDateString()) {
-    return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
-  } 
-  if (data.toDateString() === ontem.toDateString()) {
+  // Obtém a data no fuso de São Paulo no formato YYYY-MM-DD
+  const dataStr = dataMs.toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+  const hojeStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+
+  const ontemObj = new Date();
+  ontemObj.setDate(ontemObj.getDate() - 1);
+  const ontemStr = ontemObj.toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+
+  if (dataStr === hojeStr) {
+    return dataMs.toLocaleTimeString('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'America/Sao_Paulo',
+    });
+  }
+
+  if (dataStr === ontemStr) {
     return 'Ontem';
   }
-  return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'America/Sao_Paulo' });
-};
 
-/**
- * Verifica se a data do lead pertence ao dia de HOJE considerando o fuso de São Paulo
- */
-export const isHoje = (dataIso: string | null | undefined): boolean => {
-  if (!dataIso) return false;
-  const ms = parseDataSegura(dataIso);
-  if (ms === 0) return false;
-
-  const dataTarget = new Date(ms).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-  const hoje = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-
-  return dataTarget === hoje;
+  return dataMs.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+    timeZone: 'America/Sao_Paulo',
+  });
 };
