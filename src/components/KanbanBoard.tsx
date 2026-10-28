@@ -1,4 +1,4 @@
-// File: components/KanbanBoard.tsx
+// File: src/components/KanbanBoard.tsx
 
 "use client";
 
@@ -6,7 +6,13 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
-// PARSER SEGURO: Vacina anti-NaN
+// NORMALIZADOR DE STRINGS
+const normalizeStr = (str?: string | null): string => {
+  if (!str) return '';
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+};
+
+// PARSER SEGURO DE DATAS
 const parseDataSegura = (dateStr: string | null | undefined): number => {
   if (!dateStr) return 0;
   const safeStr = typeof dateStr === 'string' ? dateStr.trim().replace(' ', 'T') : dateStr;
@@ -123,11 +129,11 @@ const formatarMoeda = (val?: number | string | null): string => {
   return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
-// ⚙️ MOTOR DE FUSO HORÁRIO E LIMITES (O SEGREDO DA PRECISÃO)
+// MOTOR DE FUSO HORÁRIO E LIMITES
 const getIsoDateBounds = (range: string, customStart?: string, customEnd?: string) => {
   const now = new Date();
-  let start = new Date(0); // Epoch start
-  let end = new Date(8640000000000000); // Epoch max
+  let start = new Date(0);
+  let end = new Date(8640000000000000);
 
   if (range === 'this_month') {
     start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
@@ -171,7 +177,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const [unidadeFilter, setUnidadeFilter] = useState('all');
   const [activeTab, setActiveTab] = useState<'kanban' | 'analytics' | 'calendar'>('kanban');
 
-  // ESTADO DA BANNER (A Única Fonte da Verdade)
   const [dbMetrics, setDbMetrics] = useState({
     total_leads: 0,
     agendados: 0,
@@ -192,7 +197,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const userUnidade = userProfile?.unidade || 'all';
   const targetUnidade = (!isAdmin && userUnidade && userUnidade !== 'Todas' && userUnidade !== 'all') ? userUnidade : unidadeFilter;
 
-  // FETCH DAS MÉTRICAS DIRETAMENTE DA RPC
   const fetchDbMetrics = useCallback(async () => {
     const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
     const { data, error } = await supabase.rpc('get_kanban_metrics', {
@@ -220,26 +224,36 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     }
   }, [userProfile, isAdmin, userUnidade]);
 
+  const fetchLeads = async () => {
+    const { data, error } = await supabase
+      .from('dentup_leads')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(3000);
+
+    if (error) {
+      console.error('❌ Erro no fetchLeads:', error);
+    } else {
+      setLeads(data || []);
+    }
+  };
+
   useEffect(() => {
     setIsBrowser(true);
     fetchLeads();
     fetchDbMetrics();
 
-    const channel = supabase.channel('kanban-realtime')
+    const channelName = `kanban-realtime-${Math.random().toString(36).substring(2, 9)}`;
+    const channel = supabase.channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_leads' }, () => {
         fetchLeads();
         fetchDbMetrics();
       })
       .subscribe();
+
     return () => { supabase.removeChannel(channel); };
   }, [fetchDbMetrics]);
 
-  const fetchLeads = async () => {
-    const { data, error } = await supabase.from('dentup_leads').select('*');
-    if (!error) setLeads(data || []);
-  };
-
-  // ARRRASTAR E SOLTAR (Atualiza a Data Exata Automaticamente)
   const handleDragEnd = async (result: any) => {
     const { destination, source, draggableId } = result;
     if (!destination) return;
@@ -254,11 +268,11 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     };
 
     if (newStatus === 'vendido') {
-      const leadEncontrado = leads.find(l => l.id === draggableId);
+      const leadEncontrado = leads.find(l => String(l.id) === String(draggableId));
       if (leadEncontrado && !leadEncontrado.data_venda) updates.data_venda = agoraISO;
     }
 
-    setLeads((prev) => prev.map((l) => (l.id === draggableId ? { ...l, ...updates } : l)));
+    setLeads((prev) => prev.map((l) => (String(l.id) === String(draggableId) ? { ...l, ...updates } : l)));
     await supabase.from('dentup_leads').update(updates).eq('id', draggableId);
     fetchDbMetrics();
   };
@@ -280,9 +294,12 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     }
 
     setSavingPatient(true);
+    const cleanPhone = newPatientForm.phone.replace(/\D/g, '');
+    const agoraISO = new Date().toISOString();
+
     const payload = {
       name: newPatientForm.name,
-      phone: newPatientForm.phone,
+      phone: cleanPhone,
       unidade: newPatientForm.unidade,
       procedimento: newPatientForm.procedimento,
       promotor: newPatientForm.promotor,
@@ -290,31 +307,49 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       valor_venda: newPatientForm.valor_venda ? Number(newPatientForm.valor_venda) : null,
       status: 'novo',
       is_paused: true,
-      created_at: new Date().toISOString(),
-      data_movimentacao: new Date().toISOString()
+      created_at: agoraISO,
+      data_movimentacao: agoraISO
     };
 
-    const { error } = await supabase.from('dentup_leads').insert([payload]).select();
+    const { data, error } = await supabase.from('dentup_leads').insert([payload]).select();
     setSavingPatient(false);
 
     if (error) {
-      alert('Erro ao cadastrar: ' + error.message);
-    } else {
+      if (error.message?.includes('duplicate key') || error.code === '23505') {
+        alert('⚠️ Este paciente ou número de WhatsApp já está cadastrado no CRM!');
+      } else {
+        alert('Erro ao cadastrar: ' + error.message);
+      }
+    } else if (data && data.length > 0) {
+      const novoRegistro = data[0];
+
+      if (isAdmin) {
+        setUnidadeFilter(newPatientForm.unidade);
+      }
+
+      setLeads((prevLeads) => [novoRegistro, ...prevLeads]);
+
       setIsNewPatientModalOpen(false);
       setNewPatientForm({
-        name: '', phone: '', unidade: !isAdmin && userUnidade !== 'all' ? userUnidade : 'Santo André', procedimento: 'Avaliação Geral', promotor: 'Passante de Rua', notas_internas: '', valor_venda: ''
+        name: '',
+        phone: '',
+        unidade: !isAdmin && userUnidade !== 'all' ? userUnidade : 'Santo André',
+        procedimento: 'Avaliação Geral',
+        promotor: 'Passante de Rua',
+        notas_internas: '',
+        valor_venda: ''
       });
-      fetchLeads();
-      fetchDbMetrics();
+
+      await fetchLeads();
+      await fetchDbMetrics();
     }
   };
 
-  // FILTRAGEM VISUAL DO KANBAN (Sincronizado com os Bounds do Banner)
   const leadsNaUnidadeGlobal = useMemo(() => {
     return leads.filter((lead) => {
       if (targetUnidade === 'all' || targetUnidade === 'Todas') return true;
       const leadUnid = lead.unidade || lead.unit || 'Pendente';
-      return leadUnid.toLowerCase() === targetUnidade.toLowerCase();
+      return normalizeStr(leadUnid) === normalizeStr(targetUnidade);
     });
   }, [leads, targetUnidade]);
 
@@ -323,7 +358,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
     
     return leadsNaUnidadeGlobal.filter((lead) => {
-      // Se QUALQUER data pertinente estiver no período, o card deve aparecer na tela para alinhar com o número do banner.
+      if (lead.status === 'novo') return true;
+
       const dates = [
         parseDataSegura(lead.created_at),
         parseDataSegura(lead.data_agendamento),
@@ -344,7 +380,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     );
   }, [leadsVisiveisKanban, searchTerm]);
 
-  // CÁLCULO DAS TAXAS BASEADO NA VERDADE DO SUPABASE
   const taxaAgendamento = dbMetrics.total_leads > 0 ? ((dbMetrics.agendados / dbMetrics.total_leads) * 100).toFixed(1) : '0.0';
   const taxaConfirmacao = dbMetrics.agendados > 0 ? ((dbMetrics.confirmados / dbMetrics.agendados) * 100).toFixed(1) : '0.0';
   const taxaComparecimento = dbMetrics.confirmados > 0 ? ((dbMetrics.compareceram / dbMetrics.confirmados) * 100).toFixed(1) : '0.0';
@@ -369,7 +404,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const feedbackAtual = leadDrawer?.feedback || 'Não Informado';
   const opcoesFeedback = OPCOES_FEEDBACK_PADRAO.includes(feedbackAtual) ? OPCOES_FEEDBACK_PADRAO : [feedbackAtual, ...OPCOES_FEEDBACK_PADRAO];
 
-  // ANALYTICS BLINDADO
   const procsCount = useMemo(() => {
     const counts: Record<string, number> = {};
     const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
@@ -388,13 +422,13 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   return (
     <div className="flex flex-col h-full bg-[#F8FAFC] text-slate-800 font-sans">
       
+      {/* HEADER & FILTROS */}
       <div className="bg-white border-b border-slate-200/80 z-10 sticky top-0 shadow-sm">
-        
         <div className="px-6 py-3 flex items-center justify-between border-b border-slate-100 gap-4 flex-wrap">
           
           <div className="flex bg-slate-100/80 p-1 rounded-xl border border-slate-200/60">
             <button onClick={() => setActiveTab('kanban')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'kanban' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" /></svg>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 01-2-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" /></svg>
               <span>Quadro CRM</span>
             </button>
             <button onClick={() => setActiveTab('analytics')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'analytics' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
@@ -446,7 +480,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         </div>
 
-        {/* 📊 BANNER DE MÉTRICAS (Alimentado pelo Banco de Dados) */}
+        {/* BANNER DE MÉTRICAS */}
         <div className="px-6 py-3 bg-slate-50/70 flex items-center justify-between gap-4 overflow-x-auto custom-scrollbar">
           <div className="flex items-center gap-6 md:gap-8 shrink-0">
             <div className="flex items-center gap-3">
@@ -559,7 +593,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                               const isAlerta = horasParado >= 12 && horasParado < 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(coluna.id);
 
                               return (
-                                <Draggable key={lead.id} draggableId={lead.id} index={index}>
+                                <Draggable key={String(lead.id)} draggableId={String(lead.id)} index={index}>
                                   {(provided, snapshot) => (
                                     <div
                                       ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps}
@@ -675,7 +709,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
-        {/* 🗂️ FICHA DO PACIENTE (GAVETA LATERAL) */}
+        {/* FICHA DO PACIENTE (DRAWER) */}
         {leadDrawer && (
           <>
             <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm z-20" onClick={() => setLeadDrawer(null)} />
@@ -703,7 +737,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <div>
                     <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Unidade</label>
                     <select value={leadDrawer.unidade || 'Pendente'} onChange={(e) => handleUpdateLead('unidade', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer">
-                      {['Pendente', 'Santo André', 'Diadema', 'Mauá', 'São Mateus'].map(u => <option key={u} value={u}>{u}</option>)}
+                      {['Pendente', ...LISTA_UNIDADES].map(u => <option key={u} value={u}>{u}</option>)}
                     </select>
                   </div>
                   <div>
@@ -782,7 +816,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </>
         )}
 
-        {/* 🆕 MODAL DE CADASTRAR NOVO PACIENTE */}
+        {/* MODAL DE CADASTRAR NOVO PACIENTE */}
         {isNewPatientModalOpen && (
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
