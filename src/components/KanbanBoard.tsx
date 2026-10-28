@@ -1,10 +1,14 @@
-// File: components/KanbanBoard.tsx
+// File: src/components/KanbanBoard.tsx
 
 "use client";
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+
+import MetricsBanner from './kanban/MetricsBanner';
+import KanbanFilters from './kanban/KanbanFilters';
+import KanbanCard from './kanban/KanbanCard';
 
 // PARSER SEGURO: Vacina anti-NaN
 const parseDataSegura = (dateStr: string | null | undefined): number => {
@@ -47,9 +51,9 @@ const OPCOES_FEEDBACK_PADRAO = [
 ];
 
 const getTempoCronologicoKanban = (lead: any) => {
-  const timeMovimentacao = parseDataSegura(lead.data_movimentacao);
+  const timeMovimentacao = parseDataSegura(lead?.data_movimentacao);
   if (timeMovimentacao > 0) return timeMovimentacao;
-  return parseDataSegura(lead.created_at);
+  return parseDataSegura(lead?.created_at);
 };
 
 const getHorasParado = (lead: any): number => {
@@ -123,11 +127,10 @@ const formatarMoeda = (val?: number | string | null): string => {
   return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
-// ⚙️ MOTOR DE FUSO HORÁRIO E LIMITES (O SEGREDO DA PRECISÃO)
 const getIsoDateBounds = (range: string, customStart?: string, customEnd?: string) => {
   const now = new Date();
-  let start = new Date(0); // Epoch start
-  let end = new Date(8640000000000000); // Epoch max
+  let start = new Date(0);
+  let end = new Date(8640000000000000);
 
   if (range === 'this_month') {
     start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
@@ -171,7 +174,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const [unidadeFilter, setUnidadeFilter] = useState('all');
   const [activeTab, setActiveTab] = useState<'kanban' | 'analytics' | 'calendar'>('kanban');
 
-  // ESTADO DA BANNER (A Única Fonte da Verdade)
   const [dbMetrics, setDbMetrics] = useState({
     total_leads: 0,
     agendados: 0,
@@ -192,7 +194,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const userUnidade = userProfile?.unidade || 'all';
   const targetUnidade = (!isAdmin && userUnidade && userUnidade !== 'Todas' && userUnidade !== 'all') ? userUnidade : unidadeFilter;
 
-  // FETCH DAS MÉTRICAS DIRETAMENTE DA RPC
   const fetchDbMetrics = useCallback(async () => {
     const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
     const { data, error } = await supabase.rpc('get_kanban_metrics', {
@@ -225,13 +226,18 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     fetchLeads();
     fetchDbMetrics();
 
-    const channel = supabase.channel('kanban-realtime')
+    // REALTIME SUPABASE CORRIGIDO: Encadeia .on() ANTES de .subscribe()
+    const channelName = `kanban-realtime-${Math.random().toString(36).substring(2, 9)}`;
+    const channel = supabase.channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_leads' }, () => {
         fetchLeads();
         fetchDbMetrics();
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+
+    return () => { 
+      supabase.removeChannel(channel); 
+    };
   }, [fetchDbMetrics]);
 
   const fetchLeads = async () => {
@@ -239,7 +245,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     if (!error) setLeads(data || []);
   };
 
-  // ARRRASTAR E SOLTAR (Atualiza a Data Exata Automaticamente)
   const handleDragEnd = async (result: any) => {
     const { destination, source, draggableId } = result;
     if (!destination) return;
@@ -254,11 +259,11 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     };
 
     if (newStatus === 'vendido') {
-      const leadEncontrado = leads.find(l => l.id === draggableId);
+      const leadEncontrado = (leads || []).find(l => String(l.id) === String(draggableId));
       if (leadEncontrado && !leadEncontrado.data_venda) updates.data_venda = agoraISO;
     }
 
-    setLeads((prev) => prev.map((l) => (l.id === draggableId ? { ...l, ...updates } : l)));
+    setLeads((prev) => (prev || []).map((l) => (String(l.id) === String(draggableId) ? { ...l, ...updates } : l)));
     await supabase.from('dentup_leads').update(updates).eq('id', draggableId);
     fetchDbMetrics();
   };
@@ -267,7 +272,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     if (!leadDrawer) return;
     const updatedDrawer = { ...leadDrawer, [campo]: valor };
     setLeadDrawer(updatedDrawer);
-    setLeads((prev) => prev.map((l) => (l.id === leadDrawer.id ? { ...l, [campo]: valor } : l)));
+    setLeads((prev) => (prev || []).map((l) => (l.id === leadDrawer.id ? { ...l, [campo]: valor } : l)));
     await supabase.from('dentup_leads').update({ [campo]: valor }).eq('id', leadDrawer.id);
     fetchDbMetrics();
   };
@@ -309,9 +314,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     }
   };
 
-  // FILTRAGEM VISUAL DO KANBAN (Sincronizado com os Bounds do Banner)
   const leadsNaUnidadeGlobal = useMemo(() => {
-    return leads.filter((lead) => {
+    return (leads || []).filter((lead) => {
       if (targetUnidade === 'all' || targetUnidade === 'Todas') return true;
       const leadUnid = lead.unidade || lead.unit || 'Pendente';
       return leadUnid.toLowerCase() === targetUnidade.toLowerCase();
@@ -323,7 +327,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
     
     return leadsNaUnidadeGlobal.filter((lead) => {
-      // Se QUALQUER data pertinente estiver no período, o card deve aparecer na tela para alinhar com o número do banner.
       const dates = [
         parseDataSegura(lead.created_at),
         parseDataSegura(lead.data_agendamento),
@@ -344,7 +347,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     );
   }, [leadsVisiveisKanban, searchTerm]);
 
-  // CÁLCULO DAS TAXAS BASEADO NA VERDADE DO SUPABASE
   const taxaAgendamento = dbMetrics.total_leads > 0 ? ((dbMetrics.agendados / dbMetrics.total_leads) * 100).toFixed(1) : '0.0';
   const taxaConfirmacao = dbMetrics.agendados > 0 ? ((dbMetrics.confirmados / dbMetrics.agendados) * 100).toFixed(1) : '0.0';
   const taxaComparecimento = dbMetrics.confirmados > 0 ? ((dbMetrics.compareceram / dbMetrics.confirmados) * 100).toFixed(1) : '0.0';
@@ -369,7 +371,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const feedbackAtual = leadDrawer?.feedback || 'Não Informado';
   const opcoesFeedback = OPCOES_FEEDBACK_PADRAO.includes(feedbackAtual) ? OPCOES_FEEDBACK_PADRAO : [feedbackAtual, ...OPCOES_FEEDBACK_PADRAO];
 
-  // ANALYTICS BLINDADO
   const procsCount = useMemo(() => {
     const counts: Record<string, number> = {};
     const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
@@ -390,144 +391,38 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       
       <div className="bg-white border-b border-slate-200/80 z-10 sticky top-0 shadow-sm">
         
-        <div className="px-6 py-3 flex items-center justify-between border-b border-slate-100 gap-4 flex-wrap">
-          
-          <div className="flex bg-slate-100/80 p-1 rounded-xl border border-slate-200/60">
-            <button onClick={() => setActiveTab('kanban')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'kanban' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" /></svg>
-              <span>Quadro CRM</span>
-            </button>
-            <button onClick={() => setActiveTab('analytics')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'analytics' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-              <span>Analytics</span>
-            </button>
-            <button onClick={() => setActiveTab('calendar')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'calendar' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-              <span>Agenda</span>
-            </button>
-          </div>
+        {/* COMPONENTE DE FILTROS */}
+        <KanbanFilters
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          isAdmin={isAdmin}
+          userUnidade={userUnidade}
+          targetUnidade={targetUnidade}
+          setUnidadeFilter={setUnidadeFilter}
+          dateRange={dateRange}
+          setDateRange={setDateRange}
+          customStart={customStart}
+          setCustomStart={setCustomStart}
+          customEnd={customEnd}
+          setCustomEnd={setCustomEnd}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          onNovoPaciente={() => setIsNewPatientModalOpen(true)}
+          unidades={LISTA_UNIDADES}
+        />
 
-          <div className="flex items-center gap-3 flex-wrap">
-            <button onClick={() => setIsNewPatientModalOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all shadow-sm hover:shadow flex items-center gap-1.5 cursor-pointer">
-              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-              <span>Novo Paciente</span>
-            </button>
-
-            <select disabled={!isAdmin && userUnidade !== 'Todas' && userUnidade !== 'all'} value={targetUnidade} onChange={(e) => setUnidadeFilter(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-semibold outline-none focus:border-blue-500 cursor-pointer">
-              <option value="all">Todas as Unidades</option>
-              {LISTA_UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-            </select>
-
-            {activeTab !== 'calendar' && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <select value={dateRange} onChange={(e) => setDateRange(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium outline-none focus:border-blue-500 cursor-pointer">
-                  <option value="this_month">Este Mês</option>
-                  <option value="today">Hoje</option>
-                  <option value="yesterday">Ontem</option>
-                  <option value="last_7">Últimos 7 dias</option>
-                  <option value="all">Todo o Período</option>
-                  <option value="custom">Personalizado</option>
-                </select>
-
-                {dateRange === 'custom' && (
-                  <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-lg border border-slate-200/80">
-                    <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="bg-white border border-slate-200 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 cursor-pointer shadow-sm" />
-                    <span className="text-[11px] font-bold text-slate-400">até</span>
-                    <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="bg-white border border-slate-200 rounded-md px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 cursor-pointer shadow-sm" />
-                  </div>
-                )}
-
-                <div className="relative">
-                  <input type="text" placeholder="Buscar paciente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500 w-44 shadow-inner" />
-                  <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* 📊 BANNER DE MÉTRICAS (Alimentado pelo Banco de Dados) */}
-        <div className="px-6 py-3 bg-slate-50/70 flex items-center justify-between gap-4 overflow-x-auto custom-scrollbar">
-          <div className="flex items-center gap-6 md:gap-8 shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-2.5 h-2.5 rounded-full bg-slate-400"></div>
-              <div>
-                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Leads Totais</span>
-                <span className="text-xl md:text-2xl font-black text-slate-800 leading-tight">{dbMetrics.total_leads}</span>
-              </div>
-            </div>
-
-            <svg className="w-4 h-4 text-slate-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
-
-            <div className="flex items-center gap-3">
-              <div className="w-2.5 h-2.5 rounded-full bg-indigo-500"></div>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">Agendados (IA)</span>
-                  <span className="text-[10px] font-extrabold bg-indigo-100 text-indigo-700 px-1.5 py-0.2 rounded-full">{taxaAgendamento}%</span>
-                </div>
-                <span className="text-xl md:text-2xl font-black text-indigo-600 leading-tight">{dbMetrics.agendados}</span>
-              </div>
-            </div>
-
-            <svg className="w-4 h-4 text-slate-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
-
-            <div className="flex items-center gap-3">
-              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Confirmados</span>
-                  <span className="text-[10px] font-extrabold bg-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded-full">{taxaConfirmacao}%</span>
-                </div>
-                <span className="text-xl md:text-2xl font-black text-emerald-600 leading-tight">{dbMetrics.confirmados}</span>
-              </div>
-            </div>
-
-            <svg className="w-4 h-4 text-slate-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
-
-            <div className="flex items-center gap-3">
-              <div className="w-2.5 h-2.5 rounded-full bg-amber-500"></div>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Na Clínica</span>
-                  <span className="text-[10px] font-extrabold bg-amber-100 text-amber-700 px-1.5 py-0.2 rounded-full">{taxaComparecimento}%</span>
-                </div>
-                <span className="text-xl md:text-2xl font-black text-amber-600 leading-tight">{dbMetrics.compareceram}</span>
-              </div>
-            </div>
-
-            <svg className="w-4 h-4 text-slate-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
-
-            <div className="flex items-center gap-3">
-              <div className="w-2.5 h-2.5 rounded-full bg-teal-500"></div>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold text-teal-600 uppercase tracking-wider">Vendas Fechadas</span>
-                  <span className="text-[10px] font-extrabold bg-teal-100 text-teal-700 px-1.5 py-0.2 rounded-full">{taxaFechamento}%</span>
-                </div>
-                <span className="text-xl md:text-2xl font-black text-teal-600 leading-tight">{dbMetrics.vendidos}</span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 pl-4 border-l border-slate-200">
-              <div className="w-3 h-3 rounded-full bg-emerald-600 animate-pulse"></div>
-              <div>
-                <span className="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Faturamento</span>
-                <span className="text-xl md:text-2xl font-black text-emerald-600 leading-tight">{formatarMoeda(dbMetrics.faturamento_total)}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 pl-4 border-l border-slate-200 shrink-0">
-            <div className="flex flex-col items-end">
-              <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-                SLA Parado (+24h)
-              </span>
-              <span className="text-lg font-extrabold text-red-600">{totalEstagnados}</span>
-            </div>
-          </div>
-        </div>
+        {/* COMPONENTE DE MÉTRICAS */}
+        <MetricsBanner
+          leads={leads}
+          selectedUnit={targetUnidade}
+          dbMetrics={dbMetrics}
+          taxaAgendamento={taxaAgendamento}
+          taxaConfirmacao={taxaConfirmacao}
+          taxaComparecimento={taxaComparecimento}
+          taxaFechamento={taxaFechamento}
+          totalEstagnados={totalEstagnados}
+          formatarMoeda={formatarMoeda}
+        />
       </div>
 
       <div className="flex flex-1 overflow-hidden relative">
@@ -553,77 +448,30 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                           </div>
                           
                           <div className="flex-1 overflow-y-auto space-y-3 p-1 custom-scrollbar min-h-[150px]">
-                            {leadsDaColuna.map((lead, index) => {
-                              const horasParado = getHorasParado(lead);
-                              const isCritico = horasParado >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(coluna.id);
-                              const isAlerta = horasParado >= 12 && horasParado < 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(coluna.id);
-
-                              return (
-                                <Draggable key={lead.id} draggableId={lead.id} index={index}>
-                                  {(provided, snapshot) => (
-                                    <div
-                                      ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps}
-                                      onClick={() => setLeadDrawer(lead)}
-                                      className={`p-4 rounded-xl border transition-all cursor-grab group bg-white ${
-                                        snapshot.isDragging ? 'border-blue-500 shadow-xl z-50 scale-[1.02]' : 
-                                        isCritico ? 'border-red-300 bg-red-50 hover:border-red-400 shadow-sm' : 
-                                        isAlerta ? 'border-amber-300 bg-amber-50 hover:border-amber-400 shadow-sm' : 
-                                        'border-slate-200 shadow-sm hover:border-blue-400 hover:shadow-md'
-                                      }`}
-                                      style={{ ...provided.draggableProps.style }}
-                                    >
-                                      <div className="flex justify-between items-start mb-1.5 gap-2">
-                                        <h4 className="font-semibold text-slate-900 text-base group-hover:text-blue-600 transition-colors line-clamp-1">{lead.name || 'Sem Nome'}</h4>
-                                        {lead.is_paused && <span className="text-xs bg-slate-800 text-white px-2 py-1 rounded-md font-medium shrink-0 shadow-sm">Humano</span>}
-                                      </div>
-                                      
-                                      <p className="text-xs font-medium text-slate-500 mb-2">
-                                        {formatarTelefone(lead.phone || lead.phone_number)}
-                                      </p>
-                                      
-                                      {lead.promotor && (
-                                        <p className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded w-fit mb-2">
-                                          👤 Origem: {lead.promotor}
-                                        </p>
-                                      )}
-
-                                      {lead.valor_venda && Number(lead.valor_venda) > 0 && (
-                                        <div className="flex flex-col gap-1.5 mb-2 w-fit">
-                                          <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-md">
-                                            💰 {formatarMoeda(lead.valor_venda)}
-                                          </div>
-                                          {lead.data_venda && (
-                                            <div className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-white border border-emerald-100 px-2 py-0.5 rounded shadow-sm w-fit">
-                                              📅 Venda: {formatarDataCurta(lead.data_venda)}
-                                            </div>
-                                          )}
-                                        </div>
-                                      )}
-
-                                      {lead.data_agendamento && (
-                                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-700 bg-indigo-50/90 border border-indigo-100/80 px-2.5 py-1 rounded-lg mb-2.5 w-fit">
-                                          <svg className="w-3.5 h-3.5 text-indigo-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                          </svg>
-                                          <span>{formatarDataAgendamento(lead.data_agendamento)}</span>
-                                        </div>
-                                      )}
-
-                                      <div className="flex justify-between items-center pt-3 border-t border-slate-100">
-                                        <span className="text-xs text-slate-600 font-medium bg-slate-100 px-2 py-1 rounded-md">{lead.unidade !== 'Pendente' ? lead.unidade : 'Sem Unidade'}</span>
-                                        <span className={`text-xs font-semibold px-2 py-1 rounded-md flex items-center gap-1.5 ${
-                                          isCritico ? 'bg-red-100 text-red-700' : 
-                                          isAlerta ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'
-                                        }`}>
-                                          {isCritico && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}
-                                          {formatarTempoParado(horasParado)}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  )}
-                                </Draggable>
-                              );
-                            })}
+                            {leadsDaColuna.map((lead, index) => (
+                              <Draggable key={String(lead.id)} draggableId={String(lead.id)} index={index}>
+                                {(provided) => (
+                                  <div
+                                    ref={provided.innerRef}
+                                    {...provided.draggableProps}
+                                    {...provided.dragHandleProps}
+                                    style={{ ...provided.draggableProps.style }}
+                                  >
+                                    <KanbanCard
+                                      lead={lead}
+                                      colunaId={coluna.id}
+                                      onClickLead={(l) => setLeadDrawer(l)}
+                                      formatarTelefone={formatarTelefone}
+                                      formatarMoeda={formatarMoeda}
+                                      formatarDataCurta={formatarDataCurta}
+                                      formatarDataAgendamento={formatarDataAgendamento}
+                                      formatarTempoParado={formatarTempoParado}
+                                      getHorasParado={getHorasParado}
+                                    />
+                                  </div>
+                                )}
+                              </Draggable>
+                            ))}
                             {provided.placeholder}
                           </div>
                         </div>
@@ -636,6 +484,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
+        {/* ABA ANALYTICS */}
         {activeTab === 'analytics' && (
           <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
@@ -663,6 +512,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
+        {/* ABA AGENDA */}
         {activeTab === 'calendar' && (
           <div className="flex-1 h-full w-full bg-white p-4">
             <iframe 
@@ -675,7 +525,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </div>
         )}
 
-        {/* 🗂️ FICHA DO PACIENTE (GAVETA LATERAL) */}
+        {/* FICHA DO PACIENTES */}
         {leadDrawer && (
           <>
             <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm z-20" onClick={() => setLeadDrawer(null)} />
@@ -685,7 +535,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <h3 className="font-bold text-slate-800 text-lg">Ficha do Paciente</h3>
                   <p className="text-xs text-slate-500 mt-0.5">Gestão de Informações</p>
                 </div>
-                <button onClick={() => setLeadDrawer(null)} className="text-slate-400 hover:text-slate-700 text-xl font-light">✕</button>
+                <button onClick={() => setLeadDrawer(null)} className="text-slate-400 hover:text-slate-700 text-xl font-light cursor-pointer">✕</button>
               </div>
               
               <div className="p-8 flex-1 overflow-y-auto space-y-6 custom-scrollbar">
@@ -703,7 +553,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                   <div>
                     <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Unidade</label>
                     <select value={leadDrawer.unidade || 'Pendente'} onChange={(e) => handleUpdateLead('unidade', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer">
-                      {['Pendente', 'Santo André', 'Diadema', 'Mauá', 'São Mateus'].map(u => <option key={u} value={u}>{u}</option>)}
+                      {['Pendente', ...LISTA_UNIDADES].map(u => <option key={u} value={u}>{u}</option>)}
                     </select>
                   </div>
                   <div>
@@ -770,10 +620,10 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
               <div className="p-6 border-t border-slate-100 bg-white">
                 <div className="grid grid-cols-2 gap-4">
-                  <button onClick={() => handleUpdateLead('is_paused', !leadDrawer.is_paused)} className={`py-2.5 rounded-lg font-bold text-xs transition-colors border ${leadDrawer.is_paused ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'}`}>
+                  <button onClick={() => handleUpdateLead('is_paused', !leadDrawer.is_paused)} className={`py-2.5 rounded-lg font-bold text-xs transition-colors border cursor-pointer ${leadDrawer.is_paused ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'}`}>
                     {leadDrawer.is_paused ? '▶ Retomar Robô (IA)' : '⏸️ Pausar IA (Assumir)'}
                   </button>
-                  <button onClick={() => { if (onSelectLead) onSelectLead(leadDrawer); }} className="py-2.5 bg-blue-600 text-white rounded-lg font-bold text-xs hover:bg-blue-700 transition-all shadow-sm">
+                  <button onClick={() => { if (onSelectLead) onSelectLead(leadDrawer); }} className="py-2.5 bg-blue-600 text-white rounded-lg font-bold text-xs hover:bg-blue-700 transition-all shadow-sm cursor-pointer">
                     Abrir no Chat
                   </button>
                 </div>
@@ -782,10 +632,10 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           </>
         )}
 
-        {/* 🆕 MODAL DE CADASTRAR NOVO PACIENTE */}
+        {/* MODAL NOVO PACIENTE */}
         {isNewPatientModalOpen && (
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-100">
               <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                 <div>
                   <h3 className="font-bold text-slate-800 text-base">Cadastrar Novo Paciente</h3>

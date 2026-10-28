@@ -11,7 +11,7 @@ import Header from '../components/layout/Header';
 import ChatSidebar from '../components/chat/ChatSidebar';
 import ChatWindow from '../components/chat/ChatWindow';
 import { useLeads } from '../hooks/useLeads';
-import { getUltimaInteracao } from '../utils/dateUtils';
+import { parseDataSegura } from '../utils/dateUtils';
 import { formatDateSeparator, parseMensagem, isMensagemTecnica } from '../utils/chatUtils';
 
 export default function HomePage() {
@@ -24,6 +24,9 @@ export default function HomePage() {
   const [selectedLead, setSelectedLead] = useState<any | null>(null);
   const [newMessage, setNewMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Mapa com o timestamp da ÚLTIMA MENSAGEM REAL por telefone
+  const [lastMessageMap, setLastMessageMap] = useState<Record<string, string>>({});
 
   // Controle do Modal de Equipe
   const [showTeamModal, setShowTeamModal] = useState(false);
@@ -76,20 +79,73 @@ export default function HomePage() {
     };
   }, [router]);
 
-  // SELEÇÃO AUTOMÁTICA DO PRIMEIRO LEAD COM MENSAGEM AO CARREGAR
+  // BUSCA INICIAL E WEBSOCKET DAS MENSAGENS PARA MAPEAMENTO DE CHAT ATIVO
   useEffect(() => {
-    if (leads.length > 0) {
-      if (!selectedLead) {
-        const sortedWithChat = [...leads]
-          .filter((lead) => {
-            const ms = getUltimaInteracao(lead);
-            const isManualWithoutChat = lead.origem === 'manual' && !lead.ultima_interacao;
-            return ms > 0 && !isManualWithoutChat;
-          })
-          .sort((a, b) => getUltimaInteracao(b) - getUltimaInteracao(a));
+    if (loadingAuth) return;
 
-        if (sortedWithChat.length > 0) {
-          setSelectedLead(sortedWithChat[0]);
+    const fetchLastMessages = async () => {
+      const { data, error } = await supabase
+        .from('dentup_messages')
+        .select('session_id, created_at')
+        .order('created_at', { ascending: false })
+        .limit(3000);
+
+      if (!error && data) {
+        const map: Record<string, string> = {};
+        data.forEach((msg) => {
+          if (!msg.session_id) return;
+          const cleanPhone = msg.session_id.replace('dentup_', '').replace(/\D/g, '');
+          if (!map[cleanPhone]) {
+            map[cleanPhone] = msg.created_at;
+          }
+        });
+        setLastMessageMap(map);
+      }
+    };
+
+    fetchLastMessages();
+
+    // Nome dinâmico para evitar colisão de canais no Fast Refresh do Next.js
+    const channelName = `global-messages-sidebar-${Date.now()}`;
+    const globalMessagesChannel = supabase
+      .channel(channelName)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
+        const newMsg = payload.new;
+        if (!newMsg || !newMsg.session_id) return;
+        if (isMensagemTecnica(newMsg)) return;
+
+        const cleanPhoneFromSession = newMsg.session_id.replace('dentup_', '').replace(/\D/g, '');
+        const msgDate = newMsg.created_at || new Date().toISOString();
+
+        setLastMessageMap((prev) => ({
+          ...prev,
+          [cleanPhoneFromSession]: msgDate
+        }));
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(globalMessagesChannel);
+    };
+  }, [loadingAuth]);
+
+  // SELEÇÃO AUTOMÁTICA DO PRIMEIRO LEAD COM MENSAGEM REAL AO CARREGAR
+  useEffect(() => {
+    if (leads.length > 0 && Object.keys(lastMessageMap).length > 0) {
+      if (!selectedLead) {
+        const activeLeads = leads
+          .filter((lead) => {
+            const cleanPhone = (lead.phone || lead.phone_number || '').replace(/\D/g, '');
+            return !!lastMessageMap[cleanPhone];
+          })
+          .sort((a, b) => {
+            const phoneA = (a.phone || a.phone_number || '').replace(/\D/g, '');
+            const phoneB = (b.phone || b.phone_number || '').replace(/\D/g, '');
+            return parseDataSegura(lastMessageMap[phoneB]) - parseDataSegura(lastMessageMap[phoneA]);
+          });
+
+        if (activeLeads.length > 0) {
+          setSelectedLead(activeLeads[0]);
         }
       } else {
         const updated = leads.find((l) => l.id === selectedLead.id);
@@ -98,7 +154,7 @@ export default function HomePage() {
         }
       }
     }
-  }, [leads]);
+  }, [leads, lastMessageMap]);
 
   // BUSCA E CANAL REALTIME DE MENSAGENS DO LEAD SELECIONADO
   useEffect(() => {
@@ -118,8 +174,9 @@ export default function HomePage() {
     };
     fetchMessages();
 
+    const channelName = `chat_messages_realtime_${cleanPhone}_${Date.now()}`;
     const messagesChannel = supabase
-      .channel(`chat_messages_realtime_${cleanPhone}`)
+      .channel(channelName)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
           const newMsg = payload.new;
           if (newMsg && newMsg.session_id === targetSessionId) {
@@ -217,13 +274,27 @@ export default function HomePage() {
   const isAdmin = cargoNorm === 'admin' || cargoNorm === 'administrador' || cargoNorm === 'administrador geral';
   const userUnidade = userProfile?.unidade || 'Todas';
 
-  const sortedLeads = [...leads]
+  // FILTRAGEM E ORDENAÇÃO BASEADA ESTRITAMENTE NA TABELA DE MENSAGENS
+  const sortedLeadsWithChat = leads
     .filter((lead) => {
-      if (isAdmin || !userUnidade || userUnidade === 'Todas') return true;
-      const leadUnidade = lead.unidade || lead.unit || 'Sem Unidade';
-      return leadUnidade.toLowerCase() === userUnidade.toLowerCase();
+      if (!isAdmin && userUnidade && userUnidade !== 'Todas') {
+        const leadUnidade = lead.unidade || lead.unit || 'Sem Unidade';
+        if (leadUnidade.toLowerCase() !== userUnidade.toLowerCase()) return false;
+      }
+
+      const cleanPhone = (lead.phone || lead.phone_number || '').replace(/\D/g, '');
+      return !!lastMessageMap[cleanPhone];
     })
-    .sort((a, b) => getUltimaInteracao(b) - getUltimaInteracao(a));
+    .map((lead) => {
+      const cleanPhone = (lead.phone || lead.phone_number || '').replace(/\D/g, '');
+      return {
+        ...lead,
+        ultima_interacao_real: lastMessageMap[cleanPhone]
+      };
+    })
+    .sort((a, b) => {
+      return parseDataSegura(b.ultima_interacao_real) - parseDataSegura(a.ultima_interacao_real);
+    });
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans notranslate" translate="no">
@@ -252,7 +323,7 @@ export default function HomePage() {
           <div className="flex h-full w-full bg-white border-x border-slate-200">
             {/* SIDEBAR DE CONVERSAS COMPONENTIZADA */}
             <ChatSidebar
-              sortedLeads={sortedLeads}
+              sortedLeads={sortedLeadsWithChat}
               selectedLead={selectedLead}
               onSelectLead={(lead) => setSelectedLead(lead)}
               isAdmin={isAdmin}

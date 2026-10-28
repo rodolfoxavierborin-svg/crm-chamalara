@@ -21,7 +21,7 @@ export function useFilteredLeads(
     const spNowStr = now.toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
 
     return leads.filter((lead) => {
-      // 1. Filtro de Unidade / Permissões
+      // 1. FILTRO DE UNIDADE E PERMISSÕES DE ACESSO
       const leadUnit = lead.unidade || lead.unit || 'Sem Unidade';
       if (!isAdmin && userUnidade && userUnidade !== 'Todas') {
         if (leadUnit.toLowerCase() !== userUnidade.toLowerCase()) return false;
@@ -30,7 +30,7 @@ export function useFilteredLeads(
         if (leadUnit.toLowerCase() !== selectedUnit.toLowerCase()) return false;
       }
 
-      // 2. Filtro de Pesquisa (Nome ou Telefone)
+      // 2. FILTRO DE PESQUISA (NOME OU TELEFONE)
       if (searchQuery && searchQuery.trim() !== '') {
         const query = searchQuery.toLowerCase().trim();
         const name = (lead.name || lead.nome || '').toLowerCase();
@@ -41,38 +41,56 @@ export function useFilteredLeads(
         }
       }
 
-      // 3. Filtro Determinístico de Período (Fuso Horário de São Paulo)
-      const rawDate = lead['última_interação'] || lead.ultima_interacao || lead.created_at;
-      const ms = parseDataSegura(rawDate);
-      if (ms === 0 && selectedPeriod !== 'Todo o Período') return false;
+      // 3. FILTRO DETERMINÍSTICO DE PERÍODO (REGRA TRIPLA DE DATAS NO FUSO SP)
+      if (selectedPeriod === 'Todo o Período' || selectedPeriod === 'todos') return true;
 
-      const leadDateSP = new Date(ms).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+      // Obtém o timestamp das 3 datas vitais do paciente
+      const msCreated = parseDataSegura(lead.created_at || lead.created);
+      const msAgendamento = parseDataSegura(lead.data_agendamento);
+      const msMovimentacao = parseDataSegura(lead.data_movimentacao || lead.ultima_interacao);
 
-      if (selectedPeriod === 'Hoje') {
-        return leadDateSP === spNowStr;
+      // Converte cada data para YYYY-MM-DD no fuso de São Paulo
+      const dateCreatedSP = msCreated > 0 ? new Date(msCreated).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }) : '';
+      const dateAgendamentoSP = msAgendamento > 0 ? new Date(msAgendamento).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }) : '';
+      const dateMovimentacaoSP = msMovimentacao > 0 ? new Date(msMovimentacao).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }) : '';
+
+      // FILTRO: HOJE
+      if (selectedPeriod === 'Hoje' || selectedPeriod === 'hoje') {
+        return dateCreatedSP === spNowStr || dateAgendamentoSP === spNowStr || dateMovimentacaoSP === spNowStr;
       }
 
+      // FILTRO: ONTEM
       if (selectedPeriod === 'Ontem') {
         const yesterday = new Date(now);
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdaySPStr = yesterday.toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
-        return leadDateSP === yesterdaySPStr;
+        return dateCreatedSP === yesterdaySPStr || dateAgendamentoSP === yesterdaySPStr || dateMovimentacaoSP === yesterdaySPStr;
       }
 
+      // FILTRO: ÚLTIMOS 7 DIAS
       if (selectedPeriod === 'Últimos 7 dias') {
         const sevenDaysAgo = new Date(now);
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         const sevenDaysAgoSPStr = sevenDaysAgo.toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
-        return leadDateSP >= sevenDaysAgoSPStr && leadDateSP <= spNowStr;
+        
+        const isCreatedRecent = dateCreatedSP >= sevenDaysAgoSPStr && dateCreatedSP <= spNowStr;
+        const isAgendadoRecent = dateAgendamentoSP >= sevenDaysAgoSPStr && dateAgendamentoSP <= spNowStr;
+        const isMovimentadoRecent = dateMovimentacaoSP >= sevenDaysAgoSPStr && dateMovimentacaoSP <= spNowStr;
+
+        return isCreatedRecent || isAgendadoRecent || isMovimentadoRecent;
       }
 
-      if (selectedPeriod === 'Este Mês') {
+      // FILTRO: ESTE MÊS
+      if (selectedPeriod === 'Este Mês' || selectedPeriod === 'mes') {
         const currentMonthSP = spNowStr.slice(0, 7); // 'YYYY-MM'
-        const leadMonthSP = leadDateSP.slice(0, 7);
-        return leadMonthSP === currentMonthSP;
+        return (
+          dateCreatedSP.slice(0, 7) === currentMonthSP ||
+          dateAgendamentoSP.slice(0, 7) === currentMonthSP ||
+          dateMovimentacaoSP.slice(0, 7) === currentMonthSP
+        );
       }
 
-      return true; // 'Todo o Período'
+      return true;
     });
   }, [leads, selectedUnit, selectedPeriod, searchQuery, isAdmin, userUnidade]);
 

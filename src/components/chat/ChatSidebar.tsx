@@ -3,7 +3,7 @@
 "use client";
 
 import React from 'react';
-import { formatarHorarioWhatsApp, getUltimaInteracao } from '../../utils/dateUtils';
+import { formatarHorarioWhatsApp } from '../../utils/dateUtils';
 
 interface ChatSidebarProps {
   sortedLeads: any[];
@@ -20,18 +20,6 @@ export default function ChatSidebar({
   isAdmin,
   userUnidade,
 }: ChatSidebarProps) {
-  // REGRA DETERMINÍSTICA DE NEGÓCIO DO CHAT:
-  // 1. Filtra apenas os leads com interação real de mensagens (origem WhatsApp)
-  // 2. Oculta pacientes do balcão ("+ Novo Paciente") que não possuem histórico de chat
-  // 3. Ordena do mais recente para o mais antigo via relógio de ms
-  const chatLeads = sortedLeads
-    .filter((lead) => {
-      const ultimaInteracaoMs = getUltimaInteracao(lead);
-      const isManualWithoutChat = lead.origem === 'manual' && !lead.ultima_interacao;
-      return ultimaInteracaoMs > 0 && !isManualWithoutChat;
-    })
-    .sort((a, b) => getUltimaInteracao(b) - getUltimaInteracao(a));
-
   return (
     <div
       className={`w-full md:w-[380px] border-r border-slate-200 bg-white flex flex-col ${
@@ -51,14 +39,15 @@ export default function ChatSidebar({
           )}
         </div>
         <span className="text-xs bg-blue-100 text-blue-700 font-bold px-2.5 py-0.5 rounded-full">
-          {chatLeads.length}
+          {sortedLeads.length}
         </span>
       </div>
 
-      {/* LISTA DE LEADS / PACIENTES */}
+      {/* LISTA DE LEADS COM MENSAGENS REAIS */}
       <ul className="flex-1 overflow-y-auto bg-white custom-scrollbar">
-        {chatLeads.map((lead) => {
-          const ultimaInteracao = lead.ultima_interacao || lead.created_at;
+        {sortedLeads.map((lead) => {
+          // Usa estritamente a data da última mensagem real trocada no WhatsApp
+          const ultimaInteracaoReal = lead.ultima_interacao_real || lead.created_at;
           const isSelected = selectedLead?.id === lead.id;
           const photo = lead.avatar_url || lead.photo_url || lead.profile_pic;
 
@@ -93,12 +82,12 @@ export default function ChatSidebar({
                   </p>
                   <span
                     className={`text-[11px] whitespace-nowrap ml-2 font-bold ${
-                      formatarHorarioWhatsApp(ultimaInteracao) === 'Ontem'
+                      formatarHorarioWhatsApp(ultimaInteracaoReal) === 'Ontem'
                         ? 'text-emerald-600'
                         : 'text-slate-400'
                     }`}
                   >
-                    {formatarHorarioWhatsApp(ultimaInteracao)}
+                    {formatarHorarioWhatsApp(ultimaInteracaoReal)}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
