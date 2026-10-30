@@ -1,166 +1,25 @@
 // File: src/components/KanbanBoard.tsx
-
 "use client";
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-
+import { DragDropContext } from '@hello-pangea/dnd';
+import { COLUNAS, LISTA_UNIDADES, parseDataSegura, getIsoDateBounds, getHorasParado, getTempoCronologicoKanban, formatarMoeda } from '../utils/kanbanUtils';
 import MetricsBanner from './kanban/MetricsBanner';
 import KanbanFilters from './kanban/KanbanFilters';
-import KanbanCard from './kanban/KanbanCard';
+import KanbanColumn from './kanban/KanbanColumn';
+import KanbanCalendar from './kanban/KanbanCalendar';
+import KanbanAnalytics from './kanban/KanbanAnalytics';
+import LeadDrawer from './kanban/LeadDrawer';
+import CreatePatientModal from './kanban/CreatePatientModal';
 
-// PARSER SEGURO: Vacina anti-NaN
-const parseDataSegura = (dateStr: string | null | undefined): number => {
-  if (!dateStr) return 0;
-  const safeStr = typeof dateStr === 'string' ? dateStr.trim().replace(' ', 'T') : dateStr;
-  const time = new Date(safeStr).getTime();
-  return isNaN(time) ? 0 : time;
-};
-
-const COLUNAS = [
-  { id: 'novo', titulo: 'Novos Pacientes', dot: 'bg-blue-500' },
-  { id: 'nao_respondeu', titulo: 'Não Respondeu', dot: 'bg-amber-500' },
-  { id: 'agendado', titulo: 'Agendados (IA)', dot: 'bg-indigo-500' },
-  { id: 'confirmado', titulo: 'Confirmados', dot: 'bg-emerald-500' },
-  { id: 'no_show', titulo: 'Faltou (No-Show)', dot: 'bg-red-500' },
-  { id: 'na_clinica', titulo: 'Na Clínica', dot: 'bg-amber-500' },
-  { id: 'vendido', titulo: 'Tratamento Fechado', dot: 'bg-teal-500' },
-  { id: 'nao_vendido', titulo: 'Tratamento Não Fechado', dot: 'bg-rose-500' },
-  { id: 'encerrado', titulo: 'Encerrados', dot: 'bg-slate-400' },
-];
-
-const LISTA_UNIDADES = ['Santo André', 'Diadema', 'Mauá', 'São Mateus'];
-
-const GOOGLE_CALENDARS: Record<string, { id: string; color: string }> = {
-  'Santo André': { id: 'e53816e5210cbd29f4e2d525f75e9fdbad0333c901a13d213e98d791e99b23b0%40group.calendar.google.com', color: '%23D50000' },
-  'Diadema': { id: '205188e12762a447906c539183a8be8e191162831ea3526fced0b3d7a9bf31ff%40group.calendar.google.com', color: '%23F6BF26' },
-  'Mauá': { id: '6d64444a84645cd3a6871595cc4f6b1929cdd13d175ef676b5c89f3e4ee265b5%40group.calendar.google.com', color: '%230B8043' },
-  'São Mateus': { id: '84903b0600945eccd716d5c0b51a620758e8ea1c6dc7a8bfa75a0b498febfbec%40group.calendar.google.com', color: '%238E24AA' },
-};
-
-const OPCOES_PROCEDIMENTO_PADRAO = [
-  'Não Informado', 'Avaliação para prótese dentária', 'Implante Dentário', 'Prótese Dentária',
-  'Aparelho Ortodôntico', 'Avaliação Geral', 'Limpeza / Profilaxia', 'Clareamento Dentário',
-  'Tratamento de Canal', 'Extração / Cirurgia'
-];
-
-const OPCOES_FEEDBACK_PADRAO = [
-  'Não Informado', 'FECHOU', 'MARCOU RETORNO', 'ACHOU CARO', 'NÃO QUIZ',
-  'SEM INTERESSE', 'VOU FALAR COM A FAMILIA', 'SEM DINHEIRO'
-];
-
-const getTempoCronologicoKanban = (lead: any) => {
-  const timeMovimentacao = parseDataSegura(lead?.data_movimentacao);
-  if (timeMovimentacao > 0) return timeMovimentacao;
-  return parseDataSegura(lead?.created_at);
-};
-
-const getHorasParado = (lead: any): number => {
-  const timeMs = getTempoCronologicoKanban(lead);
-  if (!timeMs) return 0;
-  return Math.floor((Date.now() - timeMs) / (1000 * 60 * 60));
-};
-
-const formatarTempoParado = (horas: number): string => {
-  if (horas < 1) return 'Agora';
-  if (horas < 24) return `${horas}h`;
-  const dias = Math.floor(horas / 24);
-  const restHoras = horas % 24;
-  return restHoras > 0 ? `${dias}d ${restHoras}h` : `${dias}d`;
-};
-
-const formatarDataAgendamento = (dateStr?: string | null): string => {
-  if (!dateStr) return '';
-  const time = parseDataSegura(dateStr);
-  if (!time) return '';
-  const date = new Date(time);
-  const dia = date.getDate().toString().padStart(2, '0');
-  const mes = (date.getMonth() + 1).toString().padStart(2, '0');
-  const horas = date.getHours().toString().padStart(2, '0');
-  const minutos = date.getMinutes().toString().padStart(2, '0');
-  return `${dia}/${mes} às ${horas}:${minutos}`;
-};
-
-const formatarDataCurta = (dateStr?: string | null): string => {
-  if (!dateStr) return '';
-  const time = parseDataSegura(dateStr);
-  if (!time) return '';
-  return new Date(time).toLocaleDateString('pt-BR');
-};
-
-const formatarDataInput = (isoDate?: string | null): string => {
-  if (!isoDate) return '';
-  const time = parseDataSegura(isoDate);
-  if (!time) return '';
-  const date = new Date(time);
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-};
-
-const dateInputToISO = (dateStr: string): string | null => {
-  if (!dateStr) return null;
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return null;
-  const y = Number(parts[0]);
-  const m = Number(parts[1]) - 1;
-  const d = Number(parts[2]);
-  return new Date(y, m, d, 12, 0, 0).toISOString();
-};
-
-const formatarTelefone = (phone?: string | null): string => {
-  if (!phone) return 'Sem Telefone';
-  const clean = phone.replace(/\D/g, '');
-  if (clean.length === 13 && clean.startsWith('55')) {
-    return `(${clean.slice(2, 4)}) ${clean.slice(4, 9)}-${clean.slice(9)}`;
-  }
-  if (clean.length === 11) {
-    return `(${clean.slice(0, 2)}) ${clean.slice(2, 7)}-${clean.slice(7)}`;
-  }
-  return phone;
-};
-
-const formatarMoeda = (val?: number | string | null): string => {
-  const num = Number(val) || 0;
-  return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-};
-
-const getIsoDateBounds = (range: string, customStart?: string, customEnd?: string) => {
-  const now = new Date();
-  let start = new Date(0);
-  let end = new Date(8640000000000000);
-
-  if (range === 'this_month') {
-    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-  } else if (range === 'today') {
-    start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-  } else if (range === 'yesterday') {
-    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0);
-    end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999);
-  } else if (range === 'last_7') {
-    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0, 0);
-    end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-  } else if (range === 'custom') {
-    if (customStart) {
-      const [y, m, d] = customStart.split('-').map(Number);
-      start = new Date(y, m - 1, d, 0, 0, 0, 0);
-    }
-    if (customEnd) {
-      const [y, m, d] = customEnd.split('-').map(Number);
-      end = new Date(y, m - 1, d, 23, 59, 59, 999);
-    }
-  }
-
-  return {
-    startIso: start.toISOString(),
-    endIso: end.toISOString(),
-    startMs: start.getTime(),
-    endMs: end.getTime()
-  };
+// Normalizador Unicode para busca resiliente (fontes de WhatsApp e acentos)
+const normalizarTexto = (texto: string) => {
+  return (texto || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
 };
 
 export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLead?: (lead: any) => void; userProfile?: any }) {
@@ -173,24 +32,18 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const [customEnd, setCustomEnd] = useState('');
   const [unidadeFilter, setUnidadeFilter] = useState('all');
   const [activeTab, setActiveTab] = useState<'kanban' | 'analytics' | 'calendar'>('kanban');
-
-  const [dbMetrics, setDbMetrics] = useState({
-    total_leads: 0,
-    agendados: 0,
-    confirmados: 0,
-    compareceram: 0,
-    vendidos: 0,
-    faturamento_total: 0
-  });
-
   const [isNewPatientModalOpen, setIsNewPatientModalOpen] = useState(false);
-  const [savingPatient, setSavingPatient] = useState(false);
-  const [newPatientForm, setNewPatientForm] = useState({
-    name: '', phone: '', unidade: 'Santo André', procedimento: 'Avaliação Geral', promotor: 'Passante de Rua', notas_internas: '', valor_venda: ''
-  });
+  const [dbMetrics, setDbMetrics] = useState({ total_leads: 0, agendados: 0, confirmados: 0, compareceram: 0, vendidos: 0, faturamento_total: 0 });
 
+  // 🛡️ CONTROLE DE PERMISSÕES POR CARGO (EXATO PELAS OPÇÕES DO SISTEMA)
   const cargoNormalized = userProfile?.cargo?.toLowerCase().trim() || '';
-  const isAdmin = cargoNormalized === 'admin' || cargoNormalized === 'administrador' || cargoNormalized === 'administrador geral';
+  const isAdmin = cargoNormalized.includes('admin');
+  
+  // Autoriza APENAS "Administrador Geral" e "Gerente de Unidade"
+  const isManagerOrAdmin = cargoNormalized.includes('admin') || 
+                           cargoNormalized.includes('gerente') || 
+                           cargoNormalized.includes('gestor');
+
   const userUnidade = userProfile?.unidade || 'all';
   const targetUnidade = (!isAdmin && userUnidade && userUnidade !== 'Todas' && userUnidade !== 'all') ? userUnidade : unidadeFilter;
 
@@ -201,225 +54,166 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       p_start_date: dateRange === 'all' ? '2000-01-01T00:00:00Z' : bounds.startIso,
       p_end_date: dateRange === 'all' ? '2100-01-01T23:59:59Z' : bounds.endIso
     });
-
     if (!error && data && data.length > 0) {
+      const m = data[0];
       setDbMetrics({
-        total_leads: Number(data[0].total_leads) || 0,
-        agendados: Number(data[0].agendados) || 0,
-        confirmados: Number(data[0].confirmados) || 0,
-        compareceram: Number(data[0].compareceram) || 0,
-        vendidos: Number(data[0].vendidos) || 0,
-        faturamento_total: Number(data[0].faturamento_total) || 0
+        total_leads: Number(m.total_leads) || 0,
+        agendados: Number(m.agendados) || 0,
+        confirmados: Number(m.confirmados) || 0,
+        compareceram: Number(m.compareceram) || 0,
+        vendidos: Number(m.vendidos) || 0,
+        faturamento_total: Number(m.faturamento_total) || 0
       });
     }
   }, [dateRange, customStart, customEnd, targetUnidade]);
 
   useEffect(() => {
-    if (!isAdmin && userUnidade && userUnidade !== 'Todas' && userUnidade !== 'all') {
-      setUnidadeFilter(userUnidade);
-      setNewPatientForm((prev) => ({ ...prev, unidade: userUnidade }));
-    }
+    if (!isAdmin && userUnidade && userUnidade !== 'Todas' && userUnidade !== 'all') setUnidadeFilter(userUnidade);
   }, [userProfile, isAdmin, userUnidade]);
 
+  const fetchLeads = useCallback(async () => {
+    const { data, error } = await supabase.from('dentup_leads').select('*').order('created_at', { ascending: false }).limit(5000);
+    if (!error && data) setLeads(data);
+  }, []);
+
+  // 1. WEBSOCKET REALTIME ISOLADO
   useEffect(() => {
     setIsBrowser(true);
     fetchLeads();
+
+    const channel = supabase.channel(`kanban-realtime-${Math.random().toString(36).substring(2, 9)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_leads' }, (payload: any) => {
+        if (payload.eventType === 'INSERT' && payload.new) {
+          setLeads((prev = []) => prev.some((l) => String(l.id) === String(payload.new.id)) ? prev.map((l) => (String(l.id) === String(payload.new.id) ? { ...l, ...payload.new } : l)) : [payload.new, ...prev]);
+        } else if (payload.eventType === 'UPDATE' && payload.new) {
+          setLeads((prev = []) => prev.map((l) => (String(l.id) === String(payload.new.id) ? { ...l, ...payload.new } : l)));
+        } else if (payload.eventType === 'DELETE' && payload.old) {
+          setLeads((prev = []) => prev.filter((l) => String(l.id) !== String(payload.old.id)));
+        } else fetchLeads();
+      }).subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchLeads]);
+
+  // 2. RECARREGA RPC AO ALTERAR FILTROS
+  useEffect(() => {
     fetchDbMetrics();
-
-    // REALTIME SUPABASE CORRIGIDO: Encadeia .on() ANTES de .subscribe()
-    const channelName = `kanban-realtime-${Math.random().toString(36).substring(2, 9)}`;
-    const channel = supabase.channel(channelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_leads' }, () => {
-        fetchLeads();
-        fetchDbMetrics();
-      })
-      .subscribe();
-
-    return () => { 
-      supabase.removeChannel(channel); 
-    };
   }, [fetchDbMetrics]);
 
-  const fetchLeads = async () => {
-    const { data, error } = await supabase.from('dentup_leads').select('*');
-    if (!error) setLeads(data || []);
-  };
-
+  // 🛡️ ARRASTO COM BLOQUEIO DE SEGURANÇA NA VENDA
   const handleDragEnd = async (result: any) => {
     const { destination, source, draggableId } = result;
-    if (!destination) return;
-    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
-    
-    const newStatus = destination.droppableId;
-    const agoraISO = new Date().toISOString();
+    if (!destination || (destination.droppableId === source.droppableId && destination.index === source.index)) return;
 
-    let updates: any = { 
-      status: newStatus,
-      data_movimentacao: agoraISO 
-    };
+    const leadEncontrado = (leads || []).find((l) => String(l.id) === String(draggableId));
+    if (!leadEncontrado) return;
 
-    if (newStatus === 'vendido') {
-      const leadEncontrado = (leads || []).find(l => String(l.id) === String(draggableId));
-      if (leadEncontrado && !leadEncontrado.data_venda) updates.data_venda = agoraISO;
+    const statusOrigem = (source.droppableId || '').toLowerCase().trim();
+    const statusDestino = (destination.droppableId || '').toLowerCase().trim();
+    const statusAtualLead = (leadEncontrado.status || '').toLowerCase().trim();
+
+    // TRAVA DE SEGURANÇA: Bloqueia movimentação se o card estiver em 'vendido' e o usuário NÃO for Admin/Gerente
+    if ((statusOrigem === 'vendido' || statusAtualLead === 'vendido') && !isManagerOrAdmin) {
+      alert('🔒 Ação Bloqueada: Apenas Administradores Gerais e Gerentes de Unidade podem alterar um card de Venda Concluída.');
+      return;
     }
 
-    setLeads((prev) => (prev || []).map((l) => (String(l.id) === String(draggableId) ? { ...l, ...updates } : l)));
+    const agoraISO = new Date().toISOString();
+    const updates: any = { status: statusDestino, data_movimentacao: agoraISO };
+
+    // PRESERVAÇÃO HISTÓRICA: Grava a data_venda apenas na primeira conversão
+    if (statusDestino === 'vendido') {
+      if (!leadEncontrado.data_venda) {
+        updates.data_venda = agoraISO;
+      }
+    }
+
+    // Atualização Otimista no Estado Local
+    setLeads((prev = []) => prev.map((l) => (String(l.id) === String(draggableId) ? { ...l, ...updates } : l)));
+
+    // Persistência no Supabase e Atualização das Métricas
     await supabase.from('dentup_leads').update(updates).eq('id', draggableId);
     fetchDbMetrics();
   };
 
   const handleUpdateLead = async (campo: string, valor: any) => {
     if (!leadDrawer) return;
-    const updatedDrawer = { ...leadDrawer, [campo]: valor };
-    setLeadDrawer(updatedDrawer);
-    setLeads((prev) => (prev || []).map((l) => (l.id === leadDrawer.id ? { ...l, [campo]: valor } : l)));
+    setLeadDrawer({ ...leadDrawer, [campo]: valor });
+    setLeads((prev = []) => prev.map((l) => (l.id === leadDrawer.id ? { ...l, [campo]: valor } : l)));
     await supabase.from('dentup_leads').update({ [campo]: valor }).eq('id', leadDrawer.id);
     fetchDbMetrics();
   };
 
-  const handleCreatePatient = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPatientForm.name || !newPatientForm.phone) {
-      alert('Por favor, preencha o Nome e o WhatsApp do paciente.');
-      return;
+  const handlePatientCreated = (newPatient: any) => {
+    if (newPatient) {
+      setLeads((prev = []) => prev.some((l) => String(l.id) === String(newPatient.id)) ? prev.map((l) => (String(l.id) === String(newPatient.id) ? { ...l, ...newPatient } : l)) : [newPatient, ...prev]);
     }
-
-    setSavingPatient(true);
-    const payload = {
-      name: newPatientForm.name,
-      phone: newPatientForm.phone,
-      unidade: newPatientForm.unidade,
-      procedimento: newPatientForm.procedimento,
-      promotor: newPatientForm.promotor,
-      notas_internas: newPatientForm.notas_internas,
-      valor_venda: newPatientForm.valor_venda ? Number(newPatientForm.valor_venda) : null,
-      status: 'novo',
-      is_paused: true,
-      created_at: new Date().toISOString(),
-      data_movimentacao: new Date().toISOString()
-    };
-
-    const { error } = await supabase.from('dentup_leads').insert([payload]).select();
-    setSavingPatient(false);
-
-    if (error) {
-      alert('Erro ao cadastrar: ' + error.message);
-    } else {
-      setIsNewPatientModalOpen(false);
-      setNewPatientForm({
-        name: '', phone: '', unidade: !isAdmin && userUnidade !== 'all' ? userUnidade : 'Santo André', procedimento: 'Avaliação Geral', promotor: 'Passante de Rua', notas_internas: '', valor_venda: ''
-      });
-      fetchLeads();
-      fetchDbMetrics();
-    }
+    fetchLeads();
+    fetchDbMetrics();
   };
 
+  // FILTRO DE UNIDADES RESILIENTE ("Todas as Unidades", "all", "Todas")
   const leadsNaUnidadeGlobal = useMemo(() => {
+    const targetLower = (targetUnidade || '').toLowerCase().trim();
+    const isTodas = !targetUnidade || targetLower === 'all' || targetLower.includes('toda');
+
+    if (isTodas) return leads || [];
+
     return (leads || []).filter((lead) => {
-      if (targetUnidade === 'all' || targetUnidade === 'Todas') return true;
-      const leadUnid = lead.unidade || lead.unit || 'Pendente';
-      return leadUnid.toLowerCase() === targetUnidade.toLowerCase();
+      const leadUnit = (lead.unidade || lead.unit || 'Pendente').toLowerCase().trim();
+      return leadUnit === targetLower;
     });
   }, [leads, targetUnidade]);
 
+  // FILTRO TEMPORAL
   const leadsVisiveisKanban = useMemo(() => {
     if (dateRange === 'all') return leadsNaUnidadeGlobal;
     const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
-    
-    return leadsNaUnidadeGlobal.filter((lead) => {
-      const dates = [
-        parseDataSegura(lead.created_at),
-        parseDataSegura(lead.data_agendamento),
-        parseDataSegura(lead.data_venda),
-        parseDataSegura(lead.data_movimentacao),
-        parseDataSegura(lead.ultima_interacao || lead['última_interação'])
-      ];
-      return dates.some(timeMs => timeMs >= bounds.startMs && timeMs <= bounds.endMs);
-    });
+    return leadsNaUnidadeGlobal.filter((lead) => [
+      parseDataSegura(lead.created_at), parseDataSegura(lead.data_agendamento), parseDataSegura(lead.data_venda),
+      parseDataSegura(lead.data_movimentacao), parseDataSegura(lead.ultima_interacao || lead['última_interação'])
+    ].some(timeMs => timeMs >= bounds.startMs && timeMs <= bounds.endMs));
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
+  // BUSCA HIGIENIZADA DE TEXTO E TELEFONES
   const leadsFiltrados = useMemo(() => {
-    const termo = searchTerm.toLowerCase().trim();
-    if (!termo) return leadsVisiveisKanban;
-    return leadsVisiveisKanban.filter((lead) => 
-      (lead.name || '').toLowerCase().includes(termo) || 
-      (lead.phone || lead.phone_number || '').toLowerCase().includes(termo)
-    );
+    const termoNorm = normalizarTexto(searchTerm);
+    if (!termoNorm) return leadsVisiveisKanban;
+
+    const termoNumerico = searchTerm.replace(/\D/g, '');
+
+    return leadsVisiveisKanban.filter((lead) => {
+      const nomeNorm = normalizarTexto(lead.name);
+      const telNumerico = (lead.phone || lead.phone_number || '').replace(/\D/g, '');
+
+      const bateuNome = nomeNorm.includes(termoNorm);
+      const bateuTelefone = termoNumerico.length > 0 && (
+        telNumerico.includes(termoNumerico) || 
+        (termoNumerico.length >= 8 && telNumerico.endsWith(termoNumerico))
+      );
+
+      return bateuNome || bateuTelefone;
+    });
   }, [leadsVisiveisKanban, searchTerm]);
 
-  const taxaAgendamento = dbMetrics.total_leads > 0 ? ((dbMetrics.agendados / dbMetrics.total_leads) * 100).toFixed(1) : '0.0';
-  const taxaConfirmacao = dbMetrics.agendados > 0 ? ((dbMetrics.confirmados / dbMetrics.agendados) * 100).toFixed(1) : '0.0';
-  const taxaComparecimento = dbMetrics.confirmados > 0 ? ((dbMetrics.compareceram / dbMetrics.confirmados) * 100).toFixed(1) : '0.0';
-  const taxaFechamento = dbMetrics.compareceram > 0 ? ((dbMetrics.vendidos / dbMetrics.compareceram) * 100).toFixed(1) : '0.0';
-
-  const totalEstagnados = useMemo(() => {
-    return leadsNaUnidadeGlobal.filter(l => getHorasParado(l) >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(l.status)).length;
-  }, [leadsNaUnidadeGlobal]);
-
-  const getGoogleCalendarUrl = () => {
-    const baseUrl = "https://calendar.google.com/calendar/embed?ctz=America%2FSao_Paulo&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=1&showTz=0&mode=WEEK";
-    if (targetUnidade !== 'all' && targetUnidade !== 'Todas' && GOOGLE_CALENDARS[targetUnidade]) {
-      const cal = GOOGLE_CALENDARS[targetUnidade];
-      return `${baseUrl}&src=${cal.id}&color=${cal.color}`;
-    }
-    const allSources = Object.values(GOOGLE_CALENDARS).map(cal => `&src=${cal.id}&color=${cal.color}`).join('');
-    return `${baseUrl}${allSources}`;
-  };
-
-  const procedimentoAtual = leadDrawer?.procedimento || 'Não Informado';
-  const opcoesProcedimento = OPCOES_PROCEDIMENTO_PADRAO.includes(procedimentoAtual) ? OPCOES_PROCEDIMENTO_PADRAO : [procedimentoAtual, ...OPCOES_PROCEDIMENTO_PADRAO];
-  const feedbackAtual = leadDrawer?.feedback || 'Não Informado';
-  const opcoesFeedback = OPCOES_FEEDBACK_PADRAO.includes(feedbackAtual) ? OPCOES_FEEDBACK_PADRAO : [feedbackAtual, ...OPCOES_FEEDBACK_PADRAO];
-
-  const procsCount = useMemo(() => {
-    const counts: Record<string, number> = {};
-    const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
-    leadsNaUnidadeGlobal.filter(l => {
-      const ms = parseDataSegura(l.created_at);
-      return dateRange === 'all' || (ms >= bounds.startMs && ms <= bounds.endMs);
-    }).forEach(l => {
-      const p = l.procedimento || 'Não Informado';
-      counts[p] = (counts[p] || 0) + 1;
-    });
-    return counts;
-  }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
+  const totalEstagnados = useMemo(() => leadsNaUnidadeGlobal.filter(l => getHorasParado(l) >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(l.status)).length, [leadsNaUnidadeGlobal]);
 
   if (!isBrowser) return null;
 
   return (
     <div className="flex flex-col h-full bg-[#F8FAFC] text-slate-800 font-sans">
-      
       <div className="bg-white border-b border-slate-200/80 z-10 sticky top-0 shadow-sm">
-        
-        {/* COMPONENTE DE FILTROS */}
         <KanbanFilters
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          isAdmin={isAdmin}
-          userUnidade={userUnidade}
-          targetUnidade={targetUnidade}
-          setUnidadeFilter={setUnidadeFilter}
-          dateRange={dateRange}
-          setDateRange={setDateRange}
-          customStart={customStart}
-          setCustomStart={setCustomStart}
-          customEnd={customEnd}
-          setCustomEnd={setCustomEnd}
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
-          onNovoPaciente={() => setIsNewPatientModalOpen(true)}
-          unidades={LISTA_UNIDADES}
+          activeTab={activeTab} setActiveTab={setActiveTab} isAdmin={isAdmin} userUnidade={userUnidade}
+          targetUnidade={targetUnidade} setUnidadeFilter={setUnidadeFilter} dateRange={dateRange} setDateRange={setDateRange}
+          customStart={customStart} setCustomStart={setCustomStart} customEnd={customEnd} setCustomEnd={setCustomEnd}
+          searchTerm={searchTerm} setSearchTerm={setSearchTerm} onNovoPaciente={() => setIsNewPatientModalOpen(true)} unidades={LISTA_UNIDADES}
         />
-
-        {/* COMPONENTE DE MÉTRICAS */}
+        
         <MetricsBanner
-          leads={leads}
-          selectedUnit={targetUnidade}
+          leads={leadsVisiveisKanban}
           dbMetrics={dbMetrics}
-          taxaAgendamento={taxaAgendamento}
-          taxaConfirmacao={taxaConfirmacao}
-          taxaComparecimento={taxaComparecimento}
-          taxaFechamento={taxaFechamento}
+          selectedUnit={targetUnidade}
           totalEstagnados={totalEstagnados}
           formatarMoeda={formatarMoeda}
         />
@@ -430,282 +224,36 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           <div className="flex-1 overflow-x-auto p-6 custom-scrollbar">
             <DragDropContext onDragEnd={handleDragEnd}>
               <div className="flex gap-6 h-full items-start">
-                {COLUNAS.map((coluna) => {
-                  const leadsDaColuna = leadsFiltrados
-                    .filter((l) => (l.status || 'novo') === coluna.id)
-                    .sort((a, b) => getTempoCronologicoKanban(b) - getTempoCronologicoKanban(a));
-                  
-                  return (
-                    <Droppable droppableId={coluna.id} key={coluna.id}>
-                      {(provided, snapshot) => (
-                        <div {...provided.droppableProps} ref={provided.innerRef} className={`flex-shrink-0 w-[340px] flex flex-col max-h-full rounded-xl bg-slate-100/80 border border-slate-200 p-3 transition-colors ${snapshot.isDraggingOver ? 'bg-slate-200 border-blue-300' : ''}`}>
-                          <div className="mb-4 px-2 flex justify-between items-center pt-1">
-                            <div className="flex items-center gap-3">
-                              <div className={`w-3 h-3 rounded-full ${coluna.dot} shadow-sm`}></div>
-                              <h3 className="font-bold text-slate-800 text-base">{coluna.titulo}</h3>
-                            </div>
-                            <span className="text-slate-600 text-sm font-semibold bg-slate-200 px-3 py-1 rounded-full">{leadsDaColuna.length}</span>
-                          </div>
-                          
-                          <div className="flex-1 overflow-y-auto space-y-3 p-1 custom-scrollbar min-h-[150px]">
-                            {leadsDaColuna.map((lead, index) => (
-                              <Draggable key={String(lead.id)} draggableId={String(lead.id)} index={index}>
-                                {(provided) => (
-                                  <div
-                                    ref={provided.innerRef}
-                                    {...provided.draggableProps}
-                                    {...provided.dragHandleProps}
-                                    style={{ ...provided.draggableProps.style }}
-                                  >
-                                    <KanbanCard
-                                      lead={lead}
-                                      colunaId={coluna.id}
-                                      onClickLead={(l) => setLeadDrawer(l)}
-                                      formatarTelefone={formatarTelefone}
-                                      formatarMoeda={formatarMoeda}
-                                      formatarDataCurta={formatarDataCurta}
-                                      formatarDataAgendamento={formatarDataAgendamento}
-                                      formatarTempoParado={formatarTempoParado}
-                                      getHorasParado={getHorasParado}
-                                    />
-                                  </div>
-                                )}
-                              </Draggable>
-                            ))}
-                            {provided.placeholder}
-                          </div>
-                        </div>
-                      )}
-                    </Droppable>
-                  );
-                })}
+                {COLUNAS.map((coluna) => (
+                  <KanbanColumn
+                    key={coluna.id} id={coluna.id} titulo={coluna.titulo} dotColor={coluna.dot}
+                    leads={leadsFiltrados.filter((l) => {
+                      const st = (l.status || 'novo').toLowerCase().trim();
+                      const colId = coluna.id.toLowerCase().trim();
+                      if (colId === 'encerrado' || colId === 'encerrados') return st === 'encerrado' || st === 'encerrados';
+                      return st === colId;
+                    }).sort((a, b) => getTempoCronologicoKanban(b) - getTempoCronologicoKanban(a))}
+                    onSelectLead={(lead) => setLeadDrawer(lead)}
+                  />
+                ))}
               </div>
             </DragDropContext>
           </div>
         )}
-
-        {/* ABA ANALYTICS */}
         {activeTab === 'analytics' && (
-          <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
-              <h3 className="font-bold text-slate-800 text-lg mb-1">Demanda por Procedimento</h3>
-              <p className="text-xs text-slate-500 mb-6">Distribuição dos tratamentos buscados pelos novos pacientes</p>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {Object.entries(procsCount).map(([procedimento, quantidade]) => {
-                  const porcentagem = dbMetrics.total_leads > 0 ? ((quantidade / dbMetrics.total_leads) * 100).toFixed(1) : '0.0';
-                  return (
-                    <div key={procedimento} className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 flex flex-col justify-between">
-                      <div className="flex justify-between items-start mb-2">
-                        <span className="text-xs font-bold text-slate-700 line-clamp-1">{procedimento}</span>
-                        <span className="text-xs font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">{quantidade}</span>
-                      </div>
-                      <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                        <div className="bg-blue-600 h-full rounded-full transition-all duration-500" style={{ width: `${porcentagem}%` }} />
-                      </div>
-                      <span className="text-[10px] text-slate-400 font-medium text-right mt-1">{porcentagem}% dos leads</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+          <KanbanAnalytics
+            leadsNaUnidadeGlobal={leadsNaUnidadeGlobal}
+            dateRange={dateRange}
+            customStart={customStart}
+            customEnd={customEnd}
+            dbMetrics={dbMetrics}
+          />
         )}
-
-        {/* ABA AGENDA */}
-        {activeTab === 'calendar' && (
-          <div className="flex-1 h-full w-full bg-white p-4">
-            <iframe 
-              src={getGoogleCalendarUrl()} 
-              style={{ border: 0 }} 
-              className="w-full h-full rounded-xl border border-slate-200 shadow-sm"
-              frameBorder="0" 
-              scrolling="no"
-            />
-          </div>
-        )}
-
-        {/* FICHA DO PACIENTES */}
-        {leadDrawer && (
-          <>
-            <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm z-20" onClick={() => setLeadDrawer(null)} />
-            <div className="w-[450px] bg-white shadow-2xl flex flex-col z-30 absolute right-0 top-0 bottom-0 animate-in slide-in-from-right-8 duration-300">
-              <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                <div>
-                  <h3 className="font-bold text-slate-800 text-lg">Ficha do Paciente</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Gestão de Informações</p>
-                </div>
-                <button onClick={() => setLeadDrawer(null)} className="text-slate-400 hover:text-slate-700 text-xl font-light cursor-pointer">✕</button>
-              </div>
-              
-              <div className="p-8 flex-1 overflow-y-auto space-y-6 custom-scrollbar">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Nome Completo</label>
-                  <input type="text" value={leadDrawer.name || ''} onChange={(e) => setLeadDrawer({...leadDrawer, name: e.target.value})} onBlur={(e) => handleUpdateLead('name', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" />
-                </div>
-                
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">WhatsApp</label>
-                  <input type="text" readOnly value={formatarTelefone(leadDrawer.phone || leadDrawer.phone_number)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm text-slate-500 outline-none cursor-not-allowed" />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Unidade</label>
-                    <select value={leadDrawer.unidade || 'Pendente'} onChange={(e) => handleUpdateLead('unidade', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer">
-                      {['Pendente', ...LISTA_UNIDADES].map(u => <option key={u} value={u}>{u}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Procedimento</label>
-                    <select value={procedimentoAtual} onChange={(e) => handleUpdateLead('procedimento', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer">
-                      {opcoesProcedimento.map((p) => (<option key={p} value={p}>{p}</option>))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Feedback do Paciente</label>
-                  <select value={feedbackAtual} onChange={(e) => handleUpdateLead('feedback', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm font-medium cursor-pointer">
-                    {opcoesFeedback.map((f) => (<option key={f} value={f}>{f}</option>))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Promotor / Origem</label>
-                  <input type="text" value={leadDrawer.promotor || ''} onChange={(e) => setLeadDrawer({...leadDrawer, promotor: e.target.value})} onBlur={(e) => handleUpdateLead('promotor', e.target.value)} placeholder="Ex: Passante de Rua..." className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Anotações Internas</label>
-                  <textarea rows={4} value={leadDrawer.notas_internas || ''} onChange={(e) => setLeadDrawer({...leadDrawer, notas_internas: e.target.value})} onBlur={(e) => handleUpdateLead('notas_internas', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 resize-none shadow-sm" placeholder="Observações do atendimento clínico..." />
-                </div>
-
-                <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200/80 space-y-4">
-                  <div>
-                    <label className="text-xs font-bold text-emerald-800 uppercase block mb-1 flex items-center gap-1.5">
-                      <span>💰 Valor do Tratamento Fechado (R$)</span>
-                    </label>
-                    <input 
-                      type="number" 
-                      step="0.01" 
-                      placeholder="Ex: 3500.00" 
-                      value={leadDrawer.valor_venda ?? ''} 
-                      onChange={(e) => setLeadDrawer({...leadDrawer, valor_venda: e.target.value})} 
-                      onBlur={(e) => handleUpdateLead('valor_venda', e.target.value ? Number(e.target.value) : null)} 
-                      className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-extrabold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm" 
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-bold text-emerald-800 uppercase block mb-1 flex items-center gap-1.5">
-                      <span>📅 Data da Venda</span>
-                    </label>
-                    <input 
-                      type="date" 
-                      value={formatarDataInput(leadDrawer.data_venda)} 
-                      onChange={(e) => {
-                        const isoStr = dateInputToISO(e.target.value);
-                        setLeadDrawer({...leadDrawer, data_venda: isoStr});
-                      }} 
-                      onBlur={(e) => {
-                        const isoStr = dateInputToISO(e.target.value);
-                        handleUpdateLead('data_venda', isoStr);
-                      }}
-                      className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-semibold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm cursor-pointer" 
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-6 border-t border-slate-100 bg-white">
-                <div className="grid grid-cols-2 gap-4">
-                  <button onClick={() => handleUpdateLead('is_paused', !leadDrawer.is_paused)} className={`py-2.5 rounded-lg font-bold text-xs transition-colors border cursor-pointer ${leadDrawer.is_paused ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'}`}>
-                    {leadDrawer.is_paused ? '▶ Retomar Robô (IA)' : '⏸️ Pausar IA (Assumir)'}
-                  </button>
-                  <button onClick={() => { if (onSelectLead) onSelectLead(leadDrawer); }} className="py-2.5 bg-blue-600 text-white rounded-lg font-bold text-xs hover:bg-blue-700 transition-all shadow-sm cursor-pointer">
-                    Abrir no Chat
-                  </button>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* MODAL NOVO PACIENTE */}
-        {isNewPatientModalOpen && (
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-100">
-              <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                <div>
-                  <h3 className="font-bold text-slate-800 text-base">Cadastrar Novo Paciente</h3>
-                  <p className="text-xs text-slate-500">Adicione um novo lead manualmente no CRM</p>
-                </div>
-                <button onClick={() => setIsNewPatientModalOpen(false)} className="text-slate-400 hover:text-slate-700 text-lg font-light cursor-pointer">✕</button>
-              </div>
-
-              <form onSubmit={handleCreatePatient} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Nome Completo <span className="text-red-500">*</span></label>
-                  <input type="text" required placeholder="Ex: Maria Silva" value={newPatientForm.name} onChange={(e) => setNewPatientForm({ ...newPatientForm, name: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">WhatsApp / Telefone <span className="text-red-500">*</span></label>
-                  <input type="text" required placeholder="Ex: (11) 99999-8888" value={newPatientForm.phone} onChange={(e) => setNewPatientForm({ ...newPatientForm, phone: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Unidade</label>
-                    <select disabled={!isAdmin && userUnidade !== 'Todas' && userUnidade !== 'all'} value={newPatientForm.unidade} onChange={(e) => setNewPatientForm({ ...newPatientForm, unidade: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer">
-                      {LISTA_UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Procedimento</label>
-                    <select value={newPatientForm.procedimento} onChange={(e) => setNewPatientForm({ ...newPatientForm, procedimento: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer">
-                      {OPCOES_PROCEDIMENTO_PADRAO.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Promotor / Origem</label>
-                    <input type="text" placeholder="Ex: Passante de Rua" value={newPatientForm.promotor} onChange={(e) => setNewPatientForm({ ...newPatientForm, promotor: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Valor Venda (R$)</label>
-                    <input type="number" step="0.01" placeholder="Ex: 1500.00" value={newPatientForm.valor_venda} onChange={(e) => setNewPatientForm({ ...newPatientForm, valor_venda: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Anotações Internas</label>
-                  <textarea rows={3} placeholder="Observações iniciais do atendimento..." value={newPatientForm.notas_internas} onChange={(e) => setNewPatientForm({ ...newPatientForm, notas_internas: e.target.value })} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 resize-none shadow-sm" />
-                </div>
-
-                <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
-                  <button type="button" onClick={() => setIsNewPatientModalOpen(false)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg font-bold text-xs hover:bg-slate-200 transition-colors cursor-pointer">
-                    Cancelar
-                  </button>
-                  <button type="submit" disabled={savingPatient} className="px-5 py-2 bg-blue-600 text-white rounded-lg font-bold text-xs hover:bg-blue-700 transition-all shadow-sm flex items-center gap-2 disabled:opacity-50 cursor-pointer">
-                    {savingPatient ? 'Salvando...' : 'Cadastrar Paciente'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
+        {activeTab === 'calendar' && <KanbanCalendar targetUnidade={targetUnidade} />}
+        <LeadDrawer key={leadDrawer?.id} lead={leadDrawer} onClose={() => setLeadDrawer(null)} onUpdateLead={handleUpdateLead} onSelectLead={onSelectLead} />
+        <CreatePatientModal isOpen={isNewPatientModalOpen} onClose={() => setIsNewPatientModalOpen(false)} onPatientCreated={handlePatientCreated} isAdmin={isAdmin} userUnidade={userUnidade} />
       </div>
-      
-      <style dangerouslySetInnerHTML={{__html: `
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
-      `}} />
+      <style dangerouslySetInnerHTML={{__html: `.custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; } .custom-scrollbar::-webkit-scrollbar-track { background: transparent; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94A3B8; }`}} />
     </div>
   );
 }
