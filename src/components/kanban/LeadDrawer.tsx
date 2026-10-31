@@ -3,6 +3,7 @@
 "use client";
 
 import React from 'react';
+import { toDateStrSP } from '../../utils/dateUtils';
 
 const LISTA_UNIDADES = ['Santo André', 'Diadema', 'Mauá', 'São Mateus'];
 
@@ -42,32 +43,19 @@ const formatarTelefone = (phone?: string | null): string => {
   return phone;
 };
 
-const parseDataSegura = (dateStr: string | null | undefined): number => {
-  if (!dateStr) return 0;
-  const safeStr = typeof dateStr === 'string' ? dateStr.trim().replace(' ', 'T') : dateStr;
-  const time = new Date(safeStr).getTime();
-  return isNaN(time) ? 0 : time;
-};
-
 const formatarDataInput = (isoDate?: string | null): string => {
   if (!isoDate) return '';
-  const time = parseDataSegura(isoDate);
-  if (!time) return '';
-  const date = new Date(time);
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return toDateStrSP(isoDate);
 };
 
 const dateInputToISO = (dateStr: string): string | null => {
   if (!dateStr) return null;
   const parts = dateStr.split('-');
   if (parts.length !== 3) return null;
-  const y = Number(parts[0]);
-  const m = Number(parts[1]) - 1;
-  const d = Number(parts[2]);
-  return new Date(y, m, d, 12, 0, 0).toISOString();
+  const [y, m, d] = parts;
+  if (!y || !m || !d) return null;
+  // Ancora no meio-dia do fuso de São Paulo (America/Sao_Paulo, UTC-3)
+  return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T12:00:00-03:00`;
 };
 
 interface LeadDrawerProps {
@@ -234,8 +222,8 @@ export default function LeadDrawer({
               </label>
               <input 
                 type="date" 
-                defaultValue={formatarDataInput(lead.data_venda)} 
-                onBlur={(e) => {
+                value={formatarDataInput(lead.data_venda)} 
+                onChange={(e) => {
                   const isoStr = dateInputToISO(e.target.value);
                   onUpdateLead('data_venda', isoStr);
                 }}

@@ -47,7 +47,8 @@ export default function CreatePatientModal({
     procedimento: 'Avaliação Geral',
     promotor: 'Passante de Rua',
     notas_internas: '',
-    valor_venda: ''
+    valor_venda: '',
+    data_venda: ''
   });
 
   useEffect(() => {
@@ -59,7 +60,8 @@ export default function CreatePatientModal({
         procedimento: 'Avaliação Geral',
         promotor: 'Passante de Rua',
         notas_internas: '',
-        valor_venda: ''
+        valor_venda: '',
+        data_venda: ''
       });
     }
   }, [isOpen, defaultUnidade]);
@@ -76,20 +78,33 @@ export default function CreatePatientModal({
     setSaving(true);
     const cleanPhone = form.phone.replace(/\D/g, '');
     const agoraISO = new Date().toISOString();
+    const valorNum = form.valor_venda ? Number(form.valor_venda) : null;
 
-    const payload = {
+    let dataVendaISO: string | null = null;
+    if (form.data_venda) {
+      dataVendaISO = `${form.data_venda}T12:00:00-03:00`;
+    } else if (valorNum && valorNum > 0) {
+      const spToday = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+      dataVendaISO = `${spToday}T12:00:00-03:00`;
+    }
+
+    const payload: Record<string, any> = {
       name: form.name.trim(),
       phone: cleanPhone,
       unidade: form.unidade,
       procedimento: form.procedimento,
       promotor: form.promotor,
       notas_internas: form.notas_internas,
-      valor_venda: form.valor_venda ? Number(form.valor_venda) : null,
+      valor_venda: valorNum,
       status: 'novo',
       is_paused: true,
       created_at: agoraISO,
       data_movimentacao: agoraISO
     };
+
+    if (dataVendaISO) {
+      payload.data_venda = dataVendaISO;
+    }
 
     const { data, error } = await supabase
       .from('dentup_leads')
@@ -190,17 +205,18 @@ export default function CreatePatientModal({
             </div>
           </div>
 
+          <div>
+            <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Promotor / Origem</label>
+            <input 
+              type="text" 
+              placeholder="Ex: Passante de Rua" 
+              value={form.promotor} 
+              onChange={(e) => setForm({ ...form, promotor: e.target.value })} 
+              className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Promotor / Origem</label>
-              <input 
-                type="text" 
-                placeholder="Ex: Passante de Rua" 
-                value={form.promotor} 
-                onChange={(e) => setForm({ ...form, promotor: e.target.value })} 
-                className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
-              />
-            </div>
             <div>
               <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Valor Venda (R$)</label>
               <input 
@@ -210,6 +226,15 @@ export default function CreatePatientModal({
                 value={form.valor_venda} 
                 onChange={(e) => setForm({ ...form, valor_venda: e.target.value })} 
                 className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Data da Venda (Opcional)</label>
+              <input 
+                type="date" 
+                value={form.data_venda} 
+                onChange={(e) => setForm({ ...form, data_venda: e.target.value })} 
+                className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer" 
               />
             </div>
           </div>

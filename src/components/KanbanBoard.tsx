@@ -4,7 +4,16 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { DragDropContext } from '@hello-pangea/dnd';
-import { COLUNAS, LISTA_UNIDADES, parseDataSegura, getIsoDateBounds, getHorasParado, getTempoCronologicoKanban, formatarMoeda } from '../utils/kanbanUtils';
+import {
+  COLUNAS,
+  LISTA_UNIDADES,
+  getIsoDateBounds,
+  getHorasParado,
+  getTempoCronologicoKanban,
+  formatarMoeda,
+  isLeadWithinPeriod,
+  fetchAllLeadsFromSupabase
+} from '../utils/kanbanUtils';
 import MetricsBanner from './kanban/MetricsBanner';
 import KanbanFilters from './kanban/KanbanFilters';
 import KanbanColumn from './kanban/KanbanColumn';
@@ -71,9 +80,10 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     if (!isAdmin && userUnidade && userUnidade !== 'Todas' && userUnidade !== 'all') setUnidadeFilter(userUnidade);
   }, [userProfile, isAdmin, userUnidade]);
 
+  // Busca paginada em lotes para não descartar leads antigos com mais de 1000 registros no banco
   const fetchLeads = useCallback(async () => {
-    const { data, error } = await supabase.from('dentup_leads').select('*').order('created_at', { ascending: false }).limit(5000);
-    if (!error && data) setLeads(data);
+    const allData = await fetchAllLeadsFromSupabase(supabase);
+    setLeads(allData);
   }, []);
 
   // 1. WEBSOCKET REALTIME ISOLADO
@@ -121,15 +131,19 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     const agoraISO = new Date().toISOString();
     const updates: any = { status: statusDestino, data_movimentacao: agoraISO };
 
-    // PRESERVAÇÃO HISTÓRICA: Grava a data_venda apenas na primeira conversão
+    // PRESERVAÇÃO HISTÓRICA NO FUSO DE SÃO PAULO: Grava a data_venda apenas na primeira conversão
     if (statusDestino === 'vendido') {
       if (!leadEncontrado.data_venda) {
-        updates.data_venda = agoraISO;
+        const spToday = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+        updates.data_venda = `${spToday}T12:00:00-03:00`;
       }
     }
 
     // Atualização Otimista no Estado Local
     setLeads((prev = []) => prev.map((l) => (String(l.id) === String(draggableId) ? { ...l, ...updates } : l)));
+    if (leadDrawer && String(leadDrawer.id) === String(draggableId)) {
+      setLeadDrawer((prev: any) => (prev ? { ...prev, ...updates } : null));
+    }
 
     // Persistência no Supabase e Atualização das Métricas
     await supabase.from('dentup_leads').update(updates).eq('id', draggableId);
@@ -138,8 +152,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
   const handleUpdateLead = async (campo: string, valor: any) => {
     if (!leadDrawer) return;
-    setLeadDrawer({ ...leadDrawer, [campo]: valor });
-    setLeads((prev = []) => prev.map((l) => (l.id === leadDrawer.id ? { ...l, [campo]: valor } : l)));
+    setLeadDrawer((prev: any) => (prev ? { ...prev, [campo]: valor } : null));
+    setLeads((prev = []) => prev.map((l) => (String(l.id) === String(leadDrawer.id) ? { ...l, [campo]: valor } : l)));
     await supabase.from('dentup_leads').update({ [campo]: valor }).eq('id', leadDrawer.id);
     fetchDbMetrics();
   };
@@ -165,15 +179,30 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     });
   }, [leads, targetUnidade]);
 
-  // FILTRO TEMPORAL
+  // FILTRO TEMPORAL (Coluna 'vendido' filtrada estritamente por data_venda no fuso SP)
   const leadsVisiveisKanban = useMemo(() => {
     if (dateRange === 'all') return leadsNaUnidadeGlobal;
-    const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
-    return leadsNaUnidadeGlobal.filter((lead) => [
-      parseDataSegura(lead.created_at), parseDataSegura(lead.data_agendamento), parseDataSegura(lead.data_venda),
-      parseDataSegura(lead.data_movimentacao), parseDataSegura(lead.ultima_interacao || lead['última_interação'])
-    ].some(timeMs => timeMs >= bounds.startMs && timeMs <= bounds.endMs));
+    return leadsNaUnidadeGlobal.filter((lead) =>
+      isLeadWithinPeriod(lead, dateRange, customStart, customEnd)
+    );
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
+
+  // Sincroniza métricas de vendas fechadas e faturamento estritamente pela data_venda no período
+  const effectiveMetrics = useMemo(() => {
+    const vendidosPeriodo = leadsVisiveisKanban.filter(
+      (l) => (l.status || '').toLowerCase().trim() === 'vendido'
+    );
+    const faturamentoPeriodo = vendidosPeriodo.reduce(
+      (acc, l) => acc + (Number(l.valor_venda) || 0),
+      0
+    );
+
+    return {
+      ...dbMetrics,
+      vendidos: vendidosPeriodo.length,
+      faturamento_total: faturamentoPeriodo,
+    };
+  }, [dbMetrics, leadsVisiveisKanban]);
 
   // BUSCA HIGIENIZADA DE TEXTO E TELEFONES
   const leadsFiltrados = useMemo(() => {
@@ -183,7 +212,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     const termoNumerico = searchTerm.replace(/\D/g, '');
 
     return leadsVisiveisKanban.filter((lead) => {
-      const nomeNorm = normalizarTexto(lead.name);
+      const nomeNorm = normalizarTexto(lead.name || lead.nome || '');
       const telNumerico = (lead.phone || lead.phone_number || '').replace(/\D/g, '');
 
       const bateuNome = nomeNorm.includes(termoNorm);
@@ -212,7 +241,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
         
         <MetricsBanner
           leads={leadsVisiveisKanban}
-          dbMetrics={dbMetrics}
+          dbMetrics={effectiveMetrics}
           selectedUnit={targetUnidade}
           totalEstagnados={totalEstagnados}
           formatarMoeda={formatarMoeda}
@@ -246,7 +275,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
             dateRange={dateRange}
             customStart={customStart}
             customEnd={customEnd}
-            dbMetrics={dbMetrics}
+            dbMetrics={effectiveMetrics}
           />
         )}
         {activeTab === 'calendar' && <KanbanCalendar targetUnidade={targetUnidade} />}

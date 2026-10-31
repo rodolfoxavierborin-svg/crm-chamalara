@@ -1,8 +1,8 @@
 // File: src/utils/dateUtils.ts
 
 /**
- * Converte qualquer formato de data do Supabase (timestamptz UTC +00)
- * para Timestamp em milissegundos de forma 100% determinística.
+ * Converte qualquer formato de data do Supabase (timestamptz UTC +00, YYYY-MM-DD ou DD/MM/YYYY)
+ * para Timestamp em milissegundos de forma 100% determinística e compatível com America/Sao_Paulo.
  */
 export const parseDataSegura = (dataInput: any): number => {
   if (!dataInput) return 0;
@@ -21,7 +21,28 @@ export const parseDataSegura = (dataInput: any): number => {
       const cleanStr = dataInput.trim();
       if (!cleanStr) return 0;
 
-      const parsed = new Date(cleanStr).getTime();
+      // 1. Formato brasileiro DD/MM/YYYY (com ou sem hora)
+      const brMatch = cleanStr.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[T\s]+(\d{2}):(\d{2})(?::(\d{2}))?)?/);
+      if (brMatch) {
+        const [, dd, mm, yyyy, hh = '12', min = '00', ss = '00'] = brMatch;
+        const ms = new Date(`${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}-03:00`).getTime();
+        return isNaN(ms) ? 0 : ms;
+      }
+
+      // 2. Data pura ISO (YYYY-MM-DD) ou Timestamp meia-noite UTC (00:00:00Z / 00:00:00+00)
+      // Ancora em 12:00:00-03:00 (São Paulo) para evitar deslocamento de -3h para o dia anterior (21h)
+      const dateOnlyOrMidnightMatch = cleanStr.match(
+        /^(\d{4})-(\d{2})-(\d{2})(?:[T\s]00:00:00(?:\.0+)?(?:Z|[+-]00(?::?00)?)?)?$/
+      );
+      if (dateOnlyOrMidnightMatch) {
+        const [, yyyy, mm, dd] = dateOnlyOrMidnightMatch;
+        const ms = new Date(`${yyyy}-${mm}-${dd}T12:00:00-03:00`).getTime();
+        return isNaN(ms) ? 0 : ms;
+      }
+
+      // 3. Timestamps completos com horário específico
+      const normalizedStr = cleanStr.replace(' ', 'T');
+      const parsed = new Date(normalizedStr).getTime();
       return isNaN(parsed) ? 0 : parsed;
     }
   } catch (e) {
@@ -32,12 +53,21 @@ export const parseDataSegura = (dataInput: any): number => {
 };
 
 /**
+ * Extrai a string de data YYYY-MM-DD estritamente no fuso de São Paulo (America/Sao_Paulo)
+ */
+export const toDateStrSP = (dataInput: any): string => {
+  const ms = parseDataSegura(dataInput);
+  if (ms <= 0) return '';
+  return new Date(ms).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+};
+
+/**
  * Retorna o timestamp em ms da última interação do lead
  * Coluna oficial do banco: ultima_interacao
  */
 export const getUltimaInteracao = (lead: any): number => {
   if (!lead) return 0;
-  const rawDate = lead.ultima_interacao || lead.created_at;
+  const rawDate = lead.ultima_interacao || lead['última_interação'] || lead.created_at;
   return parseDataSegura(rawDate);
 };
 

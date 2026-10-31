@@ -4,13 +4,7 @@
 
 import React from 'react';
 import { Draggable } from '@hello-pangea/dnd';
-
-const parseDataSegura = (dateStr: string | null | undefined): number => {
-  if (!dateStr) return 0;
-  const safeStr = typeof dateStr === 'string' ? dateStr.trim().replace(' ', 'T') : dateStr;
-  const time = new Date(safeStr).getTime();
-  return isNaN(time) ? 0 : time;
-};
+import { parseDataSegura } from '../../utils/dateUtils';
 
 const defaultGetHorasParado = (lead: any): number => {
   const timeMovimentacao = parseDataSegura(lead?.data_movimentacao);
@@ -32,18 +26,24 @@ const defaultFormatarDataAgendamento = (dateStr?: string | null): string => {
   const time = parseDataSegura(dateStr);
   if (!time) return '';
   const date = new Date(time);
-  const dia = date.getDate().toString().padStart(2, '0');
-  const mes = (date.getMonth() + 1).toString().padStart(2, '0');
-  const horas = date.getHours().toString().padStart(2, '0');
-  const minutos = date.getMinutes().toString().padStart(2, '0');
-  return `${dia}/${mes} às ${horas}:${minutos}`;
+  const dataFmt = date.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    timeZone: 'America/Sao_Paulo',
+  });
+  const horaFmt = date.toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/Sao_Paulo',
+  });
+  return `${dataFmt} às ${horaFmt}`;
 };
 
 const defaultFormatarDataCurta = (dateStr?: string | null): string => {
   if (!dateStr) return '';
   const time = parseDataSegura(dateStr);
   if (!time) return '';
-  return new Date(time).toLocaleDateString('pt-BR');
+  return new Date(time).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 };
 
 const defaultFormatarTelefone = (phone?: string | null): string => {

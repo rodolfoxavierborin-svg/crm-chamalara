@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { getUltimaInteracao } from '../utils/dateUtils';
+import { fetchAllLeadsFromSupabase } from '../utils/kanbanUtils';
 
 export function useLeads(loadingAuth: boolean) {
   const [leads, setLeads] = useState<any[]>([]);
@@ -15,10 +16,8 @@ export function useLeads(loadingAuth: boolean) {
 
     const fetchLeads = async () => {
       setLoadingLeads(true);
-      const { data, error } = await supabase.from('dentup_leads').select('*');
-      if (!error && data) {
-        setLeads(data);
-      }
+      const allData = await fetchAllLeadsFromSupabase(supabase);
+      setLeads(allData);
       setLoadingLeads(false);
     };
 
@@ -28,11 +27,16 @@ export function useLeads(loadingAuth: boolean) {
     const leadsChannel = supabase
       .channel('leads-global-channel')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dentup_leads' }, (payload: any) => {
+        if (payload.eventType === 'DELETE' && payload.old) {
+          setLeads((curr) => curr.filter((l) => String(l.id) !== String(payload.old.id)));
+          return;
+        }
+
         const newLead = payload.new as any;
         if (!newLead || !newLead.id) return;
 
         setLeads((curr) => {
-          const existing = curr.find((l) => l.id === newLead.id);
+          const existing = curr.find((l) => String(l.id) === String(newLead.id));
           if (existing) {
             const localTime = getUltimaInteracao(existing);
             const dbTime = getUltimaInteracao(newLead);
@@ -41,9 +45,9 @@ export function useLeads(loadingAuth: boolean) {
               newLead.ultima_interacao = existing.ultima_interacao;
               newLead['última_interação'] = existing['última_interação'];
             }
-            return curr.map((l) => (l.id === newLead.id ? newLead : l));
+            return curr.map((l) => (String(l.id) === String(newLead.id) ? newLead : l));
           }
-          return [...curr, newLead];
+          return [newLead, ...curr];
         });
       })
       .subscribe();

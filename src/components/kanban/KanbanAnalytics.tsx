@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useMemo } from 'react';
-import { parseDataSegura, getIsoDateBounds, formatarMoeda } from '../../utils/kanbanUtils';
+import { parseDataSegura, getIsoDateBounds, formatarMoeda, isLeadWithinPeriod } from '../../utils/kanbanUtils';
 
 interface KanbanAnalyticsProps {
   leadsNaUnidadeGlobal: any[];
@@ -28,22 +28,14 @@ export default function KanbanAnalytics({
   dbMetrics,
 }: KanbanAnalyticsProps) {
 
-  // 1. FILTRAGEM TEMPORAL DOS LEADS
+  // 1. FILTRAGEM TEMPORAL DOS LEADS (Coluna 'vendido' filtrada estritamente por data_venda no fuso SP)
   const leadsPeriodo = useMemo(() => {
     if (!Array.isArray(leadsNaUnidadeGlobal)) return [];
     if (dateRange === 'all') return leadsNaUnidadeGlobal;
 
-    const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
-    return leadsNaUnidadeGlobal.filter((lead) => {
-      const datas = [
-        parseDataSegura(lead.created_at),
-        parseDataSegura(lead.data_agendamento),
-        parseDataSegura(lead.data_venda),
-        parseDataSegura(lead.data_movimentacao),
-        parseDataSegura(lead.ultima_interacao || lead['última_interação'])
-      ];
-      return datas.some((timeMs) => timeMs >= bounds.startMs && timeMs <= bounds.endMs);
-    });
+    return leadsNaUnidadeGlobal.filter((lead) =>
+      isLeadWithinPeriod(lead, dateRange, customStart, customEnd)
+    );
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
   // 2. FUNIL DE CONVERSÃO COMERCIAL DA CLÍNICA (SINCRO SUPABASE)
@@ -53,7 +45,7 @@ export default function KanbanAnalytics({
     const confirmados = dbMetrics?.confirmados ?? leadsPeriodo.filter((l) => ['confirmado', 'na_clinica', 'vendido'].includes(l.status)).length;
     const compareceram = dbMetrics?.compareceram ?? leadsPeriodo.filter((l) => ['na_clinica', 'vendido'].includes(l.status)).length;
     const vendidos = dbMetrics?.vendidos ?? leadsPeriodo.filter((l) => l.status === 'vendido').length;
-    const faturamentoTotal = dbMetrics?.faturamento_total ?? leadsPeriodo.reduce((acc, l) => acc + (Number(l.valor_venda) || 0), 0);
+    const faturamentoTotal = dbMetrics?.faturamento_total ?? leadsPeriodo.filter((l) => l.status === 'vendido').reduce((acc, l) => acc + (Number(l.valor_venda) || 0), 0);
 
     const ticketMedio = vendidos > 0 ? faturamentoTotal / vendidos : 0;
     const taxaConversaoGlobal = total > 0 ? ((vendidos / total) * 100).toFixed(1) : '0.0';
