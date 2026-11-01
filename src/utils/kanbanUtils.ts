@@ -7,8 +7,9 @@ export { parseDataSegura, toDateStrSP };
 export const COLUNAS = [
   { id: 'novo', titulo: 'Novos Pacientes', dot: 'bg-blue-500' },
   { id: 'nao_respondeu', titulo: 'Não Respondeu', dot: 'bg-amber-500' },
-  { id: 'agendado', titulo: 'Agendados (IA)', dot: 'bg-indigo-500' },
-  { id: 'confirmado', titulo: 'Confirmados', dot: 'bg-emerald-500' },
+  { id: 'agendado', titulo: 'Agendados (Lara)', dot: 'bg-indigo-500' },
+  { id: 'agendado_clinica', titulo: 'Agendados (Clínica)', dot: 'bg-emerald-500' },
+  { id: 'confirmado', titulo: 'Confirmados', dot: 'bg-emerald-600' },
   { id: 'no_show', titulo: 'Faltou (No-Show)', dot: 'bg-red-500' },
   { id: 'na_clinica', titulo: 'Na Clínica', dot: 'bg-amber-500' },
   { id: 'vendido', titulo: 'Tratamento Fechado', dot: 'bg-teal-500' },
@@ -168,8 +169,6 @@ export const fetchAllLeadsFromSupabase = async (supabaseClient: any): Promise<an
     }
 
     from += PAGE_SIZE;
-    // Trava de segurança para evitar loop infinito (suporta até 20.000 leads)
-    if (from >= 20000) break;
   }
 
   return allLeads;

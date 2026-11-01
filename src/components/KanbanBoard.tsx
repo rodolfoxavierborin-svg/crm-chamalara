@@ -139,6 +139,18 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     const agoraISO = new Date().toISOString();
     const updates: any = { status: statusDestino, data_movimentacao: agoraISO };
 
+    // ATRIBUIÇÃO AUTOMÁTICA DE AGENDAMENTO (LARA VS CLÍNICA)
+    if (statusDestino === 'agendado_clinica') {
+      updates.tipo_agendamento = 'clinica';
+      updates.agendado_por = userProfile?.nome || 'Recepção';
+      if (!leadEncontrado.data_agendamento) {
+        updates.data_agendamento = agoraISO;
+      }
+    } else if (statusDestino === 'agendado') {
+      updates.tipo_agendamento = 'lara';
+      updates.agendado_por = 'Lara (IA)';
+    }
+
     // PRESERVAÇÃO HISTÓRICA NO FUSO DE SÃO PAULO: Grava a data_venda apenas na primeira conversão
     if (statusDestino === 'vendido') {
       if (!leadEncontrado.data_venda) {
@@ -273,6 +285,12 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                       const st = (l.status || 'novo').toLowerCase().trim();
                       const colId = coluna.id.toLowerCase().trim();
                       if (colId === 'encerrado' || colId === 'encerrados') return st === 'encerrado' || st === 'encerrados';
+                      if (colId === 'agendado') {
+                        return st === 'agendado' && (l.tipo_agendamento || 'lara').toLowerCase() !== 'clinica';
+                      }
+                      if (colId === 'agendado_clinica') {
+                        return st === 'agendado_clinica' || (st === 'agendado' && (l.tipo_agendamento || '').toLowerCase() === 'clinica');
+                      }
                       return st === colId;
                     }).sort((a, b) => getTempoCronologicoKanban(b) - getTempoCronologicoKanban(a))}
                     onSelectLead={(lead) => setLeadDrawer(lead)}

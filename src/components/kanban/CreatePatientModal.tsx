@@ -46,6 +46,7 @@ export default function CreatePatientModal({
     unidade: defaultUnidade,
     procedimento: 'Avaliação Geral',
     promotor: 'Passante de Rua',
+    data_agendamento: '',
     notas_internas: '',
     valor_venda: '',
     data_venda: ''
@@ -59,6 +60,7 @@ export default function CreatePatientModal({
         unidade: defaultUnidade,
         procedimento: 'Avaliação Geral',
         promotor: 'Passante de Rua',
+        data_agendamento: '',
         notas_internas: '',
         valor_venda: '',
         data_venda: ''
@@ -88,6 +90,14 @@ export default function CreatePatientModal({
       dataVendaISO = `${spToday}T12:00:00-03:00`;
     }
 
+    let dataAgendamentoISO: string | null = null;
+    if (form.data_agendamento) {
+      const d = new Date(form.data_agendamento);
+      if (!isNaN(d.getTime())) {
+        dataAgendamentoISO = d.toISOString();
+      }
+    }
+
     const payload: Record<string, any> = {
       name: form.name.trim(),
       phone: cleanPhone,
@@ -96,11 +106,17 @@ export default function CreatePatientModal({
       promotor: form.promotor,
       notas_internas: form.notas_internas,
       valor_venda: valorNum,
-      status: 'novo',
+      status: dataAgendamentoISO ? 'agendado_clinica' : 'novo',
+      tipo_agendamento: 'clinica',
+      agendado_por: 'Recepção / Clínica',
       is_paused: true,
       created_at: agoraISO,
       data_movimentacao: agoraISO
     };
+
+    if (dataAgendamentoISO) {
+      payload.data_agendamento = dataAgendamentoISO;
+    }
 
     if (dataVendaISO) {
       payload.data_venda = dataVendaISO;
@@ -213,6 +229,22 @@ export default function CreatePatientModal({
               value={form.promotor} 
               onChange={(e) => setForm({ ...form, promotor: e.target.value })} 
               className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
+            />
+          </div>
+
+          {/* AGENDAMENTO CLÍNICO INICIAL (OPCIONAL) */}
+          <div className="bg-emerald-50/60 p-3.5 rounded-xl border border-emerald-200/80">
+            <label className="text-xs font-bold text-emerald-900 uppercase block mb-1 flex items-center gap-1.5">
+              <span>🏥 Agendamento Clínico (Opcional)</span>
+            </label>
+            <p className="text-[11px] text-emerald-700 mb-2">
+              Se já tiver horário marcado na clínica, preencha abaixo para enviar direto para a coluna Agendados (Clínica).
+            </p>
+            <input 
+              type="datetime-local" 
+              value={form.data_agendamento} 
+              onChange={(e) => setForm({ ...form, data_agendamento: e.target.value })} 
+              className="w-full bg-white border border-emerald-300 rounded-lg p-2 text-xs font-semibold text-emerald-800 outline-none focus:border-emerald-500 shadow-sm cursor-pointer" 
             />
           </div>
 

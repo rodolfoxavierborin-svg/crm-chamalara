@@ -41,7 +41,7 @@ export default function KanbanAnalytics({
   // 2. FUNIL DE CONVERSÃO COMERCIAL DA CLÍNICA (SINCRO SUPABASE)
   const funil = useMemo(() => {
     const total = dbMetrics?.total_leads ?? leadsPeriodo.length;
-    const agendados = dbMetrics?.agendados ?? leadsPeriodo.filter((l) => ['agendado', 'confirmado', 'na_clinica', 'vendido'].includes(l.status)).length;
+    const agendados = dbMetrics?.agendados ?? leadsPeriodo.filter((l) => ['agendado', 'agendado_clinica', 'confirmado', 'na_clinica', 'vendido'].includes(l.status)).length;
     const confirmados = dbMetrics?.confirmados ?? leadsPeriodo.filter((l) => ['confirmado', 'na_clinica', 'vendido'].includes(l.status)).length;
     const compareceram = dbMetrics?.compareceram ?? leadsPeriodo.filter((l) => ['na_clinica', 'vendido'].includes(l.status)).length;
     const vendidos = dbMetrics?.vendidos ?? leadsPeriodo.filter((l) => l.status === 'vendido').length;
@@ -72,7 +72,7 @@ export default function KanbanAnalytics({
       const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
       totalAgendadosIA = leadsNaUnidadeGlobal.filter((l) => {
         const st = (l.status || '').toLowerCase().trim();
-        const isAgendado = ['agendado', 'confirmado', 'na_clinica', 'vendido'].includes(st);
+        const isAgendado = ['agendado', 'agendado_clinica', 'confirmado', 'na_clinica', 'vendido'].includes(st);
         if (!isAgendado) return false;
         
         const createdMs = parseDataSegura(l.created_at);
@@ -133,7 +133,7 @@ export default function KanbanAnalytics({
       if (!mapa[uni]) mapa[uni] = { leads: 0, agendados: 0, vendidos: 0, faturamento: 0 };
 
       mapa[uni].leads += 1;
-      if (['agendado', 'confirmado', 'na_clinica', 'vendido'].includes(lead.status)) mapa[uni].agendados += 1;
+      if (['agendado', 'agendado_clinica', 'confirmado', 'na_clinica', 'vendido'].includes(lead.status)) mapa[uni].agendados += 1;
       if (lead.status === 'vendido') {
         mapa[uni].vendidos += 1;
         mapa[uni].faturamento += Number(lead.valor_venda) || 0;

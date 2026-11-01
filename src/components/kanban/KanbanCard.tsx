@@ -118,6 +118,10 @@ export default function KanbanCard({
   const dataAgendamentoTexto = formatarDataAgendamento(lead.data_agendamento);
   const valorVendaNum = Number(lead.valor_venda) || 0;
 
+  const isAgendamentoClinica = (lead.tipo_agendamento || '').toLowerCase() === 'clinica' || 
+                               statusAtual === 'agendado_clinica' ||
+                               (lead.status || '').toLowerCase() === 'agendado_clinica';
+
   const cardContent = (
     <div
       onClick={handleCardClick}
@@ -193,14 +197,25 @@ export default function KanbanCard({
           </div>
         )}
 
-        {/* AGENDAMENTO: ROXO / INDIGO COMPACTO (SEM TEXTO REDUNDANTE) */}
+        {/* AGENDAMENTO DUPLO: LARA (ROXO/ÍNDIGO) VS CLÍNICA (ESMERALDA/VERDE) */}
         {dataAgendamentoTexto && (
-          <div className="inline-flex items-center gap-1.5 bg-indigo-50/80 border border-indigo-100 text-indigo-700 px-2.5 py-1 rounded-lg text-xs font-bold w-fit">
-            <svg className="w-3.5 h-3.5 text-indigo-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            <span>{dataAgendamentoTexto}</span>
-          </div>
+          isAgendamentoClinica ? (
+            <div 
+              className="inline-flex items-center gap-1.5 bg-emerald-50/90 border border-emerald-200 text-emerald-800 px-2.5 py-1 rounded-lg text-xs font-bold w-fit shadow-2xs"
+              title={`Agendado pela Clínica / Recepção ${lead.agendado_por ? `(${lead.agendado_por})` : ''}`}
+            >
+              <span className="text-xs">🏥</span>
+              <span>{dataAgendamentoTexto}</span>
+            </div>
+          ) : (
+            <div 
+              className="inline-flex items-center gap-1.5 bg-indigo-50/90 border border-indigo-200 text-indigo-700 px-2.5 py-1 rounded-lg text-xs font-bold w-fit shadow-2xs"
+              title="Agendado pela IA Lara no WhatsApp"
+            >
+              <span className="text-xs">🤖</span>
+              <span>{dataAgendamentoTexto}</span>
+            </div>
+          )
         )}
 
         {/* ORIGEM / PROMOTOR (EXIBIDO APENAS SE NÃO HOUVER VENDA/AGENDAMENTO PARA MANTER O CARD ENXUTO) */}
