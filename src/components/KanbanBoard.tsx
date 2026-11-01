@@ -110,7 +110,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     fetchDbMetrics();
   }, [fetchDbMetrics]);
 
-  // 🛡️ ARRASTO COM BLOQUEIO DE SEGURANÇA NA VENDA
+  // 🛡️ ARRASTO COM BLOQUEIO DE SEGURANÇA E TRAVAS DE USUÁRIO
   const handleDragEnd = async (result: any) => {
     const { destination, source, draggableId } = result;
     if (!destination || (destination.droppableId === source.droppableId && destination.index === source.index)) return;
@@ -122,9 +122,17 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     const statusDestino = (destination.droppableId || '').toLowerCase().trim();
     const statusAtualLead = (leadEncontrado.status || '').toLowerCase().trim();
 
-    // TRAVA DE SEGURANÇA: Bloqueia movimentação se o card estiver em 'vendido' e o usuário NÃO for Admin/Gerente
+    // TRAVA 1: SEGURANÇA NA VENDA (Apenas Admin/Gerente pode tirar de 'vendido')
     if ((statusOrigem === 'vendido' || statusAtualLead === 'vendido') && !isManagerOrAdmin) {
       alert('🔒 Ação Bloqueada: Apenas Administradores Gerais e Gerentes de Unidade podem alterar um card de Venda Concluída.');
+      return;
+    }
+
+    // TRAVA 2: POSSE DO USUÁRIO NO CARD (Evita roubo de lead entre atendentes)
+    const leadRespId = leadEncontrado.responsavel_id;
+    const currentUserId = userProfile?.id;
+    if (leadRespId && currentUserId && String(leadRespId) !== String(currentUserId) && !isManagerOrAdmin) {
+      alert(`🔒 Ação Bloqueada: Este paciente está em atendimento por "${leadEncontrado.responsavel_nome || 'outro colaborador'}". Apenas o responsável ou um Gerente/Admin pode movimentá-lo.`);
       return;
     }
 
@@ -150,11 +158,16 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     fetchDbMetrics();
   };
 
-  const handleUpdateLead = async (campo: string, valor: any) => {
+  const handleUpdateLead = async (campoOuObjeto: string | Record<string, any>, valor?: any) => {
     if (!leadDrawer) return;
-    setLeadDrawer((prev: any) => (prev ? { ...prev, [campo]: valor } : null));
-    setLeads((prev = []) => prev.map((l) => (String(l.id) === String(leadDrawer.id) ? { ...l, [campo]: valor } : l)));
-    await supabase.from('dentup_leads').update({ [campo]: valor }).eq('id', leadDrawer.id);
+
+    const updates: Record<string, any> = typeof campoOuObjeto === 'string'
+      ? { [campoOuObjeto]: valor }
+      : campoOuObjeto;
+
+    setLeadDrawer((prev: any) => (prev ? { ...prev, ...updates } : null));
+    setLeads((prev = []) => prev.map((l) => (String(l.id) === String(leadDrawer.id) ? { ...l, ...updates } : l)));
+    await supabase.from('dentup_leads').update(updates).eq('id', leadDrawer.id);
     fetchDbMetrics();
   };
 
@@ -263,6 +276,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                       return st === colId;
                     }).sort((a, b) => getTempoCronologicoKanban(b) - getTempoCronologicoKanban(a))}
                     onSelectLead={(lead) => setLeadDrawer(lead)}
+                    userProfile={userProfile}
                   />
                 ))}
               </div>
@@ -279,7 +293,14 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           />
         )}
         {activeTab === 'calendar' && <KanbanCalendar targetUnidade={targetUnidade} />}
-        <LeadDrawer key={leadDrawer?.id} lead={leadDrawer} onClose={() => setLeadDrawer(null)} onUpdateLead={handleUpdateLead} onSelectLead={onSelectLead} />
+        <LeadDrawer 
+          key={leadDrawer?.id} 
+          lead={leadDrawer} 
+          onClose={() => setLeadDrawer(null)} 
+          onUpdateLead={handleUpdateLead} 
+          onSelectLead={onSelectLead} 
+          userProfile={userProfile}
+        />
         <CreatePatientModal isOpen={isNewPatientModalOpen} onClose={() => setIsNewPatientModalOpen(false)} onPatientCreated={handlePatientCreated} isAdmin={isAdmin} userUnidade={userUnidade} />
       </div>
       <style dangerouslySetInnerHTML={{__html: `.custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; } .custom-scrollbar::-webkit-scrollbar-track { background: transparent; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94A3B8; }`}} />

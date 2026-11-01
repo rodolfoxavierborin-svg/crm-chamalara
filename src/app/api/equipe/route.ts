@@ -158,3 +158,112 @@ export async function GET(request: Request) {
   }
 }
 
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json();
+    const { id, nome, email, cargo, unidade, password } = body || {};
+
+    if (!id) {
+      return NextResponse.json({ error: 'ID do colaborador é obrigatório.' }, { status: 400 });
+    }
+
+    const cleanNome = nome ? String(nome).trim() : undefined;
+    const cleanEmail = email ? String(email).trim().toLowerCase() : undefined;
+    const cleanCargo = cargo ? String(cargo).trim() : undefined;
+    const cleanUnidade = unidade ? String(unidade).trim() : undefined;
+    const cleanPassword = password && String(password).trim().length >= 6 ? String(password).trim() : undefined;
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+    const adminClient = createClient(supabaseUrl, serviceRoleKey || anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    if (serviceRoleKey) {
+      const authUpdateAttrs: any = {};
+      if (cleanEmail) authUpdateAttrs.email = cleanEmail;
+      if (cleanPassword) authUpdateAttrs.password = cleanPassword;
+      authUpdateAttrs.user_metadata = {
+        ...(cleanNome ? { nome: cleanNome } : {}),
+        ...(cleanCargo ? { cargo: cleanCargo } : {}),
+        ...(cleanUnidade ? { unidade: cleanUnidade } : {}),
+      };
+
+      const { error: authError } = await adminClient.auth.admin.updateUserById(id, authUpdateAttrs);
+      if (authError) {
+        return NextResponse.json({ error: 'Erro ao atualizar dados de autenticação: ' + authError.message }, { status: 400 });
+      }
+    }
+
+    const profileUpdates: any = {};
+    if (cleanNome !== undefined) profileUpdates.nome = cleanNome;
+    if (cleanEmail !== undefined) profileUpdates.email = cleanEmail;
+    if (cleanCargo !== undefined) profileUpdates.cargo = cleanCargo;
+    if (cleanUnidade !== undefined) profileUpdates.unidade = cleanUnidade;
+
+    const { data: updatedProfile, error: profileError } = await adminClient
+      .from('dentup_profiles')
+      .update(profileUpdates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (profileError) {
+      return NextResponse.json({ error: 'Erro ao atualizar dentup_profiles: ' + profileError.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, user: updatedProfile });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || 'Erro interno ao atualizar colaborador' }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const url = new URL(request.url);
+    let id = url.searchParams.get('id');
+
+    if (!id) {
+      try {
+        const body = await request.json();
+        id = body?.id;
+      } catch (_) {}
+    }
+
+    if (!id) {
+      return NextResponse.json({ error: 'ID do colaborador é obrigatório.' }, { status: 400 });
+    }
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+    const adminClient = createClient(supabaseUrl, serviceRoleKey || anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    // 1. Remove da tabela dentup_profiles
+    const { error: profileError } = await adminClient
+      .from('dentup_profiles')
+      .delete()
+      .eq('id', id);
+
+    if (profileError) {
+      return NextResponse.json({ error: 'Erro ao excluir perfil da equipe: ' + profileError.message }, { status: 500 });
+    }
+
+    // 2. Remove do Supabase Auth se tiver serviceRoleKey
+    if (serviceRoleKey) {
+      const { error: authError } = await adminClient.auth.admin.deleteUser(id);
+      if (authError) {
+        console.warn('Aviso: Perfil removido, mas falhou ao excluir auth.user:', authError.message);
+      }
+    }
+
+    return NextResponse.json({ success: true, message: 'Colaborador removido com sucesso.' });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || 'Erro interno ao excluir colaborador' }, { status: 500 });
+  }
+}

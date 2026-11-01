@@ -2,7 +2,7 @@
 
 "use client";
 
-import React from 'react';
+import React, { useState } from 'react';
 import { toDateStrSP } from '../../utils/dateUtils';
 
 const LISTA_UNIDADES = ['Santo André', 'Diadema', 'Mauá', 'São Mateus'];
@@ -31,6 +31,15 @@ const OPCOES_FEEDBACK_PADRAO = [
   'SEM DINHEIRO'
 ];
 
+const MOTIVOS_PAUSA_PADRAO = [
+  'Paciente solicitou falar com atendente humano',
+  'Dúvida clínica específica / fora do escopo da IA',
+  'Negociação de valores / condições de pagamento',
+  'Paciente compareceu presencialmente à clínica',
+  'Agendamento complexo ou encaixe de emergência',
+  'Outro motivo'
+];
+
 const formatarTelefone = (phone?: string | null): string => {
   if (!phone) return 'Sem Telefone';
   const clean = phone.replace(/\D/g, '');
@@ -54,24 +63,38 @@ const dateInputToISO = (dateStr: string): string | null => {
   if (parts.length !== 3) return null;
   const [y, m, d] = parts;
   if (!y || !m || !d) return null;
-  // Ancora no meio-dia do fuso de São Paulo (America/Sao_Paulo, UTC-3)
   return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T12:00:00-03:00`;
 };
 
 interface LeadDrawerProps {
   lead: any | null;
   onClose: () => void;
-  onUpdateLead: (campo: string, valor: any) => void;
+  onUpdateLead: (campo: string | Record<string, any>, valor?: any) => void;
   onSelectLead?: (lead: any) => void;
+  userProfile?: any;
 }
 
 export default function LeadDrawer({
   lead,
   onClose,
   onUpdateLead,
-  onSelectLead
+  onSelectLead,
+  userProfile,
 }: LeadDrawerProps) {
+  // Controle do modal de justificativa para interrupção da IA Lara
+  const [showPauseModal, setShowPauseModal] = useState(false);
+  const [motivoPausa, setMotivoPausa] = useState(MOTIVOS_PAUSA_PADRAO[0]);
+  const [motivoPausaOutro, setMotivoPausaOutro] = useState('');
+
   if (!lead) return null;
+
+  const cargoNorm = (userProfile?.cargo || '').toLowerCase();
+  const isManagerOrAdmin = cargoNorm.includes('admin') || cargoNorm.includes('gerente') || cargoNorm.includes('gestor');
+
+  // Trava de permissão: se o card pertence a outro atendente e o usuário logado não for gestor/admin
+  const leadRespId = lead.responsavel_id;
+  const currentUserId = userProfile?.id;
+  const isLockedByOther = leadRespId && currentUserId && String(leadRespId) !== String(currentUserId) && !isManagerOrAdmin;
 
   const procedimentoAtual = lead.procedimento || 'Não Informado';
   const opcoesProcedimento = OPCOES_PROCEDIMENTO_PADRAO.includes(procedimentoAtual)
@@ -83,6 +106,31 @@ export default function LeadDrawer({
     ? OPCOES_FEEDBACK_PADRAO
     : [feedbackAtual, ...OPCOES_FEEDBACK_PADRAO];
 
+  // Confirmação de pausa da IA com registro do motivo e autoria obrigatórios
+  const handleConfirmPauseAI = () => {
+    const motivoFinal = motivoPausa === 'Outro motivo' 
+      ? (motivoPausaOutro.trim() || 'Outro motivo não especificado')
+      : motivoPausa;
+
+    const agoraISO = new Date().toISOString();
+    const nomeResponsavel = userProfile?.nome || userProfile?.email || 'Atendente';
+    const idResponsavel = userProfile?.id || null;
+
+    if (typeof onUpdateLead === 'function') {
+      onUpdateLead({
+        is_paused: true,
+        responsavel_id: idResponsavel,
+        responsavel_nome: nomeResponsavel,
+        motivo_pausa: motivoFinal,
+        pausado_por: nomeResponsavel,
+        data_pausa: agoraISO,
+        data_movimentacao: agoraISO,
+      });
+    }
+
+    setShowPauseModal(false);
+  };
+
   return (
     <>
       {/* MÁSCARA ESCURA DE FUNDO */}
@@ -92,13 +140,13 @@ export default function LeadDrawer({
       />
 
       {/* DRAWER LATERAL */}
-      <div className="w-[450px] bg-white shadow-2xl flex flex-col z-30 absolute right-0 top-0 bottom-0 animate-in slide-in-from-right-8 duration-300">
+      <div className="w-[470px] bg-white shadow-2xl flex flex-col z-30 absolute right-0 top-0 bottom-0 animate-in slide-in-from-right-8 duration-300">
         
         {/* CABEÇALHO */}
-        <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+        <div className="px-8 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
           <div>
             <h3 className="font-bold text-slate-800 text-lg">Ficha do Paciente</h3>
-            <p className="text-xs text-slate-500 mt-0.5">Gestão de Informações</p>
+            <p className="text-xs text-slate-500 mt-0.5">Gestão de Informações & Atendimento</p>
           </div>
           <button 
             type="button"
@@ -108,18 +156,60 @@ export default function LeadDrawer({
             ✕
           </button>
         </div>
+
+        {/* ALERTA DE TRAVA DE SEGURANÇA (SE PERTENCER A OUTRO ATENDENTE) */}
+        {isLockedByOther && (
+          <div className="bg-amber-50 border-b border-amber-200 px-8 py-3 flex items-center gap-2 text-xs text-amber-800 font-semibold">
+            <span className="text-base">🔒</span>
+            <span>Card em atendimento por <strong>{lead.responsavel_nome || 'outro colega'}</strong>. Modo somente leitura ativado.</span>
+          </div>
+        )}
         
         {/* CONTEÚDO DO FORMULÁRIO */}
         <div className="p-8 flex-1 overflow-y-auto space-y-6 custom-scrollbar">
           
+          {/* STATUS ATUAL DO ATENDIMENTO (BLINDADO, SEM SELECT NEM BRECHAS) */}
+          <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 flex flex-col gap-2">
+            <div className="flex justify-between items-center">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
+                Canal de Atendimento
+              </span>
+
+              {lead.is_paused ? (
+                <span className="text-[10px] font-bold bg-slate-900 text-white px-2 py-0.5 rounded-md shadow-xs flex items-center gap-1">
+                  <span>👤</span>
+                  <span>Atendente: {lead.responsavel_nome || 'Equipe'}</span>
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-md shadow-xs flex items-center gap-1">
+                  <span>🤖</span>
+                  <span>Conduzido pela Lara (IA)</span>
+                </span>
+              )}
+            </div>
+
+            {/* AUDITORIA DE MOTIVO DA PAUSA (SE JÁ FOI ASSUMIDO POR HUMANO) */}
+            {lead.is_paused && lead.motivo_pausa && (
+              <div className="text-[11px] bg-white p-2 rounded-lg border border-slate-200 text-slate-600 mt-1">
+                <span className="font-bold text-slate-700">Motivo da Interrupção:</span> {lead.motivo_pausa}
+                {lead.pausado_por && (
+                  <span className="block text-[10px] text-slate-400 mt-0.5">
+                    Assumido por: {lead.pausado_por}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* NOME COMPLETO */}
           <div>
             <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Nome Completo</label>
             <input 
               type="text" 
+              disabled={isLockedByOther}
               defaultValue={lead.name || ''} 
               onBlur={(e) => onUpdateLead('name', e.target.value)} 
-              className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
+              className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm disabled:bg-slate-50 disabled:cursor-not-allowed" 
             />
           </div>
           
@@ -139,9 +229,10 @@ export default function LeadDrawer({
             <div>
               <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Unidade</label>
               <select 
+                disabled={isLockedByOther}
                 value={lead.unidade || 'Pendente'} 
                 onChange={(e) => onUpdateLead('unidade', e.target.value)} 
-                className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer"
+                className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer disabled:bg-slate-50 disabled:cursor-not-allowed"
               >
                 {['Pendente', ...LISTA_UNIDADES].map((u) => (
                   <option key={u} value={u}>{u}</option>
@@ -151,9 +242,10 @@ export default function LeadDrawer({
             <div>
               <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Procedimento</label>
               <select 
+                disabled={isLockedByOther}
                 value={procedimentoAtual} 
                 onChange={(e) => onUpdateLead('procedimento', e.target.value)} 
-                className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer"
+                className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer disabled:bg-slate-50 disabled:cursor-not-allowed"
               >
                 {opcoesProcedimento.map((p) => (
                   <option key={p} value={p}>{p}</option>
@@ -166,9 +258,10 @@ export default function LeadDrawer({
           <div>
             <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Feedback do Paciente</label>
             <select 
+              disabled={isLockedByOther}
               value={feedbackAtual} 
               onChange={(e) => onUpdateLead('feedback', e.target.value)} 
-              className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm font-medium cursor-pointer"
+              className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm font-medium cursor-pointer disabled:bg-slate-50 disabled:cursor-not-allowed"
             >
               {opcoesFeedback.map((f) => (
                 <option key={f} value={f}>{f}</option>
@@ -181,10 +274,11 @@ export default function LeadDrawer({
             <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Promotor / Origem</label>
             <input 
               type="text" 
+              disabled={isLockedByOther}
               defaultValue={lead.promotor || ''} 
               onBlur={(e) => onUpdateLead('promotor', e.target.value)} 
               placeholder="Ex: Passante de Rua..." 
-              className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 
+              className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm disabled:bg-slate-50 disabled:cursor-not-allowed" 
             />
           </div>
 
@@ -192,10 +286,11 @@ export default function LeadDrawer({
           <div>
             <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Anotações Internas</label>
             <textarea 
-              rows={4} 
+              rows={3} 
+              disabled={isLockedByOther}
               defaultValue={lead.notas_internas || ''} 
               onBlur={(e) => onUpdateLead('notas_internas', e.target.value)} 
-              className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 resize-none shadow-sm" 
+              className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 resize-none shadow-sm disabled:bg-slate-50 disabled:cursor-not-allowed" 
               placeholder="Observações do atendimento clínico..." 
             />
           </div>
@@ -209,10 +304,11 @@ export default function LeadDrawer({
               <input 
                 type="number" 
                 step="0.01" 
+                disabled={isLockedByOther}
                 placeholder="Ex: 3500.00" 
                 defaultValue={lead.valor_venda ?? ''} 
                 onBlur={(e) => onUpdateLead('valor_venda', e.target.value ? Number(e.target.value) : null)} 
-                className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-extrabold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm" 
+                className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-extrabold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm disabled:bg-slate-50 disabled:cursor-not-allowed" 
               />
             </div>
 
@@ -222,12 +318,13 @@ export default function LeadDrawer({
               </label>
               <input 
                 type="date" 
+                disabled={isLockedByOther}
                 value={formatarDataInput(lead.data_venda)} 
                 onChange={(e) => {
                   const isoStr = dateInputToISO(e.target.value);
                   onUpdateLead('data_venda', isoStr);
                 }}
-                className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-semibold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm cursor-pointer" 
+                className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-semibold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm cursor-pointer disabled:bg-slate-50 disabled:cursor-not-allowed" 
               />
             </div>
           </div>
@@ -236,16 +333,27 @@ export default function LeadDrawer({
         {/* RODAPÉ DO DRAWER COM AÇÕES */}
         <div className="p-6 border-t border-slate-100 bg-white">
           <div className="grid grid-cols-2 gap-4">
+            
+            {/* BOTÃO EXCLUSIVO DE PAUSAR / RETOMAR IA */}
             <button 
               type="button"
-              onClick={() => onUpdateLead('is_paused', !lead.is_paused)} 
-              className={`py-2.5 rounded-lg font-bold text-xs transition-colors border cursor-pointer ${
+              disabled={isLockedByOther}
+              onClick={() => {
+                if (!lead.is_paused) {
+                  setShowPauseModal(true);
+                } else {
+                  if (typeof onUpdateLead === 'function') {
+                    onUpdateLead('is_paused', false);
+                  }
+                }
+              }} 
+              className={`py-2.5 rounded-lg font-bold text-xs transition-colors border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                 lead.is_paused 
                   ? 'bg-red-500 text-white hover:bg-red-600' 
                   : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
               }`}
             >
-              {lead.is_paused ? '▶ Retomar Robô (IA)' : '⏸️ Pausar IA (Assumir)'}
+              {lead.is_paused ? '▶ Retomar IA (Lara)' : '⏸️ Pausar IA (Assumir)'}
             </button>
             
             <button 
@@ -260,6 +368,83 @@ export default function LeadDrawer({
           </div>
         </div>
       </div>
+
+      {/* MODAL DE CONFIRMAÇÃO & JUSTIFICATIVA OBRIGATÓRIA (TRAVA ANTI-FURTO) */}
+      {showPauseModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-slate-900 px-6 py-4 text-white flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🤖</span>
+                <h3 className="text-sm font-bold">Interromper IA Lara?</h3>
+              </div>
+              <button 
+                onClick={() => setShowPauseModal(false)}
+                className="text-slate-400 hover:text-white font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                A <strong>Lara (IA)</strong> está conduzindo este paciente no WhatsApp. Para garantir a transparência da equipe e não prejudicar a conversão, registre o motivo da intervenção humana:
+              </p>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Motivo da Pausa:
+                </label>
+                <select
+                  value={motivoPausa}
+                  onChange={(e) => setMotivoPausa(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer"
+                >
+                  {MOTIVOS_PAUSA_PADRAO.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+
+              {motivoPausa === 'Outro motivo' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Especifique o motivo:
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={motivoPausaOutro}
+                    onChange={(e) => setMotivoPausaOutro(e.target.value)}
+                    placeholder="Descreva o motivo da intervenção..."
+                    className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 outline-none focus:border-blue-500 resize-none shadow-sm"
+                  />
+                </div>
+              )}
+
+              <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 text-[11px] text-amber-800">
+                <span>🛡️ O lead será atribuído a você (<strong>{userProfile?.nome || 'Seu Usuário'}</strong>) e o histórico de autoria será auditado.</span>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowPauseModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmPauseAI}
+                  className="px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all shadow-sm cursor-pointer"
+                >
+                  Confirmar e Assumir
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

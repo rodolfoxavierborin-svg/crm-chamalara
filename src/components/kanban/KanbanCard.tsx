@@ -69,6 +69,7 @@ interface KanbanCardProps {
   colunaId?: string;
   onSelectLead?: (lead: any) => void;
   onClickLead?: (lead: any) => void;
+  userProfile?: any;
   formatarTelefone?: (phone?: string | null) => string;
   formatarMoeda?: (val?: number | string | null) => string;
   formatarDataCurta?: (dateStr?: string | null) => string;
@@ -83,6 +84,7 @@ export default function KanbanCard({
   colunaId = '',
   onSelectLead,
   onClickLead,
+  userProfile,
   formatarTelefone = defaultFormatarTelefone,
   formatarMoeda = defaultFormatarMoeda,
   formatarDataCurta = defaultFormatarDataCurta,
@@ -94,6 +96,16 @@ export default function KanbanCard({
   const horasParado = getHorasParado(lead);
   const isCritico = horasParado >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(statusAtual);
   const isAlerta = horasParado >= 12 && horasParado < 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(statusAtual);
+
+  const cargoNorm = (userProfile?.cargo || '').toLowerCase();
+  const isManagerOrAdmin = cargoNorm.includes('admin') || cargoNorm.includes('gerente') || cargoNorm.includes('gestor');
+  
+  // Verificação de posse do card
+  const leadRespId = lead?.responsavel_id;
+  const leadRespNome = lead?.responsavel_nome;
+  const currentUserId = userProfile?.id;
+  const isOwner = currentUserId && leadRespId && String(currentUserId) === String(leadRespId);
+  const isLockedByOther = leadRespId && currentUserId && String(leadRespId) !== String(currentUserId) && !isManagerOrAdmin;
 
   const handleCardClick = () => {
     if (onSelectLead) {
@@ -110,23 +122,53 @@ export default function KanbanCard({
     <div
       onClick={handleCardClick}
       className={`p-3.5 rounded-xl border transition-all cursor-pointer group bg-white shadow-sm hover:shadow-md relative mb-3 ${
-        isCritico
+        isLockedByOther
+          ? 'border-amber-200 bg-amber-50/10 hover:border-amber-400'
+          : isCritico
           ? 'border-red-300/80 bg-red-50/20 hover:border-red-400'
           : isAlerta
           ? 'border-amber-300/80 bg-amber-50/20 hover:border-amber-400'
           : 'border-slate-200 hover:border-blue-400'
       }`}
     >
-      {/* CABEÇALHO DO CARD: NOME DO PACIENTE E BADGE HUMANO */}
+      {/* CABEÇALHO DO CARD: NOME DO PACIENTE E IDENTIFICAÇÃO DO USUÁRIO / IA */}
       <div className="flex justify-between items-start mb-1 gap-2">
         <h4 className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors line-clamp-1 leading-snug">
           {lead.name || 'Sem Nome'}
         </h4>
-        {lead.is_paused && (
-          <span className="text-[10px] font-black bg-slate-900 text-white px-2 py-0.5 rounded-md shrink-0 shadow-xs">
-            Humano
-          </span>
-        )}
+
+        {/* IDENTIFICAÇÃO DO ATENDENTE / IA COM TRAVA VISUAL */}
+        <div className="shrink-0 flex items-center gap-1">
+          {lead.is_paused ? (
+            leadRespNome ? (
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0 shadow-xs flex items-center gap-1 ${
+                  isLockedByOther
+                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                    : isOwner
+                    ? 'bg-blue-600 text-white font-extrabold'
+                    : 'bg-slate-900 text-white'
+                }`}
+                title={isLockedByOther ? `Em atendimento por ${leadRespNome} (Travado)` : `Responsável: ${leadRespNome}`}
+              >
+                <span>{isLockedByOther ? '🔒' : '👤'}</span>
+                <span className="truncate max-w-[85px]">{leadRespNome}</span>
+              </span>
+            ) : (
+              <span className="text-[10px] font-black bg-slate-900 text-white px-2 py-0.5 rounded-md shrink-0 shadow-xs">
+                👤 Humano
+              </span>
+            )
+          ) : (
+            <span 
+              className="text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/80 px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1"
+              title="Atendimento automático pela IA Lara"
+            >
+              <span>🤖</span>
+              <span>Lara (IA)</span>
+            </span>
+          )}
+        </div>
       </div>
 
       {/* TELEFONE FORMATADO COM DDD (EX: (11) 99999-8888) */}

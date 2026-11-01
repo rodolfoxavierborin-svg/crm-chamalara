@@ -208,16 +208,27 @@ export default function HomePage() {
     router.push('/login');
   };
 
-  const togglePauseAI = async () => {
+  const togglePauseAI = async (motivo?: string) => {
     if (!selectedLead) return;
     const newStatus = !selectedLead.is_paused;
-    const updatedLead = { ...selectedLead, is_paused: newStatus };
+    const updates: any = { is_paused: newStatus };
+
+    if (newStatus) {
+      const nomeResp = userProfile?.nome || userProfile?.email || 'Atendente';
+      updates.pausado_por = nomeResp;
+      updates.data_pausa = new Date().toISOString();
+      updates.motivo_pausa = motivo || 'Assumido via Chat de Mensagens';
+      updates.responsavel_id = userProfile?.id || null;
+      updates.responsavel_nome = nomeResp;
+    }
+
+    const updatedLead = { ...selectedLead, ...updates };
     setSelectedLead(updatedLead);
     setLeads((prev: any[]) => prev.map((l) => (l.id === selectedLead.id ? updatedLead : l)));
-    await supabase.from('dentup_leads').update({ is_paused: newStatus }).eq('id', selectedLead.id);
+    await supabase.from('dentup_leads').update(updates).eq('id', selectedLead.id);
   };
 
-  const handleSendMessage = async () => {
+  const handleSendMessage = async (motivo?: string) => {
     if (newMessage.trim() === '' || !selectedLead) return;
     const messageText = newMessage;
     setNewMessage('');
@@ -234,11 +245,22 @@ export default function HomePage() {
 
     try {
       if (!selectedLead.is_paused) {
-        const leadPausado = { ...selectedLead, is_paused: true };
+        const nomeResp = userProfile?.nome || userProfile?.email || 'Atendente';
+        const pauseUpdates: any = {
+          is_paused: true,
+          pausado_por: nomeResp,
+          data_pausa: new Date().toISOString(),
+          motivo_pausa: motivo || 'Assumido via Envio de Mensagem',
+          responsavel_id: userProfile?.id || null,
+          responsavel_nome: nomeResp,
+        };
+
+        const leadPausado = { ...selectedLead, ...pauseUpdates };
         setSelectedLead(leadPausado);
         setLeads((prev: any[]) => prev.map((l) => (l.id === selectedLead.id ? leadPausado : l)));
-        await supabase.from('dentup_leads').update({ is_paused: true }).eq('id', selectedLead.id);
+        await supabase.from('dentup_leads').update(pauseUpdates).eq('id', selectedLead.id);
       }
+
       const { data: insertedMessage, error } = await supabase
         .from('dentup_messages')
         .insert({ session_id: targetSessionId, message: { type: 'human_agent', content: messageText } })
@@ -330,7 +352,7 @@ export default function HomePage() {
               userUnidade={userUnidade}
             />
 
-            {/* ÁREA DO CHAT COMPONENTIZADA */}
+            {/* ÁREA DO CHAT COMPONENTIZADA COM TRAVA ANTIFRAUDE */}
             <ChatWindow
               selectedLead={selectedLead}
               onBackMobile={() => setSelectedLead(null)}
@@ -343,6 +365,7 @@ export default function HomePage() {
               setNewMessage={setNewMessage}
               onSendMessage={handleSendMessage}
               messagesEndRef={messagesEndRef}
+              userProfile={userProfile}
             />
           </div>
         )}

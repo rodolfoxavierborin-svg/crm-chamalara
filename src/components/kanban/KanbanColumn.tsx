@@ -12,6 +12,7 @@ interface KanbanColumnProps {
   dotColor: string;
   leads: any[];
   onSelectLead: (lead: any) => void;
+  userProfile?: any;
 }
 
 export default function KanbanColumn({
@@ -20,6 +21,7 @@ export default function KanbanColumn({
   dotColor,
   leads = [],
   onSelectLead,
+  userProfile,
 }: KanbanColumnProps) {
   const isVendido = id === 'vendido';
 
@@ -70,6 +72,7 @@ export default function KanbanColumn({
                   index={index}
                   colunaId={id}
                   onSelectLead={onSelectLead}
+                  userProfile={userProfile}
                 />
               ))
             )}
