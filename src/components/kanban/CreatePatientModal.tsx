@@ -4,6 +4,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { parseValorMonetario } from '../../utils/kanbanUtils';
 
 const LISTA_UNIDADES = ['Santo André', 'Diadema', 'Mauá', 'São Mateus'];
 
@@ -80,7 +81,7 @@ export default function CreatePatientModal({
     setSaving(true);
     const cleanPhone = form.phone.replace(/\D/g, '');
     const agoraISO = new Date().toISOString();
-    const valorNum = form.valor_venda ? Number(form.valor_venda) : null;
+    const valorNum = form.valor_venda ? parseValorMonetario(form.valor_venda) : null;
 
     let dataVendaISO: string | null = null;
     if (form.data_venda) {
@@ -252,9 +253,8 @@ export default function CreatePatientModal({
             <div>
               <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Valor Venda (R$)</label>
               <input 
-                type="number" 
-                step="0.01" 
-                placeholder="Ex: 1500.00" 
+                type="text" 
+                placeholder="Ex: 1500,00" 
                 value={form.valor_venda} 
                 onChange={(e) => setForm({ ...form, valor_venda: e.target.value })} 
                 className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 shadow-sm" 

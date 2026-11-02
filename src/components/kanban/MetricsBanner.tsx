@@ -3,6 +3,7 @@
 "use client";
 
 import React from 'react';
+import { parseValorMonetario } from '../../utils/kanbanUtils';
 
 interface MetricsBannerProps {
   leads?: any[];
@@ -45,8 +46,8 @@ export default function MetricsBanner({
   const vendidos = dbMetrics?.vendidos ?? leadsUnidade.filter((l) => l.status === 'vendido').length;
   
   const faturamento = dbMetrics?.faturamento_total ?? leadsUnidade.reduce((acc, l) => {
-    if (l.status === 'vendido' || Number(l.valor_venda) > 0) {
-      return acc + (Number(l.valor_venda) || 0);
+    if (l.status === 'vendido') {
+      return acc + parseValorMonetario(l.valor_venda);
     }
     return acc;
   }, 0);

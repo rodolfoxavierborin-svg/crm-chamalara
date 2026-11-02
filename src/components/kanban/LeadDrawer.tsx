@@ -4,6 +4,7 @@
 
 import React, { useState } from 'react';
 import { toDateStrSP } from '../../utils/dateUtils';
+import { parseValorMonetario } from '../../utils/kanbanUtils';
 
 const LISTA_UNIDADES = ['Santo André', 'Diadema', 'Mauá', 'São Mateus'];
 
@@ -401,12 +402,21 @@ export default function LeadDrawer({
                 <span>💰 Valor do Tratamento Fechado (R$)</span>
               </label>
               <input 
-                type="number" 
-                step="0.01" 
+                type="text" 
                 disabled={isLockedByOther}
-                placeholder="Ex: 3500.00" 
-                defaultValue={lead.valor_venda ?? ''} 
-                onBlur={(e) => onUpdateLead('valor_venda', e.target.value ? Number(e.target.value) : null)} 
+                placeholder="Ex: 3500,00" 
+                defaultValue={lead.valor_venda ? String(lead.valor_venda).replace('.', ',') : ''} 
+                onBlur={(e) => {
+                  const valNum = parseValorMonetario(e.target.value);
+                  const updates: Record<string, any> = {
+                    valor_venda: valNum > 0 ? valNum : null
+                  };
+                  if (!lead.responsavel_id && userProfile) {
+                    updates.responsavel_id = userProfile.id;
+                    updates.responsavel_nome = userProfile.nome || userProfile.email || 'Atendente';
+                  }
+                  onUpdateLead(updates);
+                }} 
                 className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-extrabold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm disabled:bg-slate-50 disabled:cursor-not-allowed" 
               />
             </div>

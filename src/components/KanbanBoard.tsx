@@ -11,6 +11,7 @@ import {
   getHorasParado,
   getTempoCronologicoKanban,
   formatarMoeda,
+  parseValorMonetario,
   isLeadWithinPeriod,
   fetchAllLeadsFromSupabase
 } from '../utils/kanbanUtils';
@@ -157,6 +158,15 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
         const spToday = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
         updates.data_venda = `${spToday}T12:00:00-03:00`;
       }
+      // ATRIBUIÇÃO AUTOMÁTICA DE RESPONSÁVEL NA VENDA: Vincula ao usuário que fechou
+      if (!leadEncontrado.responsavel_id && userProfile) {
+        updates.responsavel_id = userProfile.id;
+        updates.responsavel_nome = userProfile.nome || userProfile.email || 'Atendente';
+      }
+      // Se não tiver valor de venda preenchido, abre o drawer imediatamente para preenchimento
+      if (!leadEncontrado.valor_venda || parseValorMonetario(leadEncontrado.valor_venda) === 0) {
+        setLeadDrawer({ ...leadEncontrado, ...updates });
+      }
     }
 
     // Atualização Otimista no Estado Local
@@ -218,7 +228,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       (l) => (l.status || '').toLowerCase().trim() === 'vendido'
     );
     const faturamentoPeriodo = vendidosPeriodo.reduce(
-      (acc, l) => acc + (Number(l.valor_venda) || 0),
+      (acc, l) => acc + parseValorMonetario(l.valor_venda),
       0
     );
 

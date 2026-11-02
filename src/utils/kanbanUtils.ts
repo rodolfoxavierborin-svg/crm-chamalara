@@ -38,8 +38,31 @@ export const getHorasParado = (lead: any): number => {
 };
 
 export const formatarMoeda = (val?: number | string | null): string => {
-  const num = Number(val) || 0;
+  const num = parseValorMonetario(val);
   return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
+
+/**
+ * Converte qualquer formato numérico ou string brasileira ("1.500,00", "1500,50", "R$ 2.000")
+ * em um número de ponto flutuante confiável sem gerar NaN ou zerar indevidamente.
+ */
+export const parseValorMonetario = (val?: number | string | null): number => {
+  if (val === null || val === undefined) return 0;
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  const str = String(val).trim();
+  if (!str) return 0;
+
+  let cleaned = str.replace(/[^\d.,-]/g, '');
+  if (cleaned.includes(',') && cleaned.includes('.')) {
+    // Padrão brasileiro com milhar: 1.500,50 -> 1500.50
+    cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+  } else if (cleaned.includes(',')) {
+    // Padrão sem milhar: 1500,50 -> 1500.50
+    cleaned = cleaned.replace(',', '.');
+  }
+
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? 0 : num;
 };
 
 /**
@@ -61,6 +84,14 @@ export const getIsoDateBounds = (range: string, customStart?: string, customEnd?
     const ddEnd = String(lastDay).padStart(2, '0');
     start = new Date(`${spYear}-${mm}-01T00:00:00.000-03:00`);
     end = new Date(`${spYear}-${mm}-${ddEnd}T23:59:59.999-03:00`);
+  } else if (r === 'last_month' || r === 'Mês Anterior' || r === 'mes_anterior') {
+    const prevYear = spMonth === 1 ? spYear - 1 : spYear;
+    const prevMonth = spMonth === 1 ? 12 : spMonth - 1;
+    const lastDay = new Date(prevYear, prevMonth, 0).getDate();
+    const mm = String(prevMonth).padStart(2, '0');
+    const ddEnd = String(lastDay).padStart(2, '0');
+    start = new Date(`${prevYear}-${mm}-01T00:00:00.000-03:00`);
+    end = new Date(`${prevYear}-${mm}-${ddEnd}T23:59:59.999-03:00`);
   } else if (r === 'today' || r === 'Hoje' || r === 'hoje') {
     start = new Date(`${spNowStr}T00:00:00.000-03:00`);
     end = new Date(`${spNowStr}T23:59:59.999-03:00`);

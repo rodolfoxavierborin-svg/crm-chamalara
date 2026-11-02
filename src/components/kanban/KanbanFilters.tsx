@@ -119,6 +119,7 @@ export default function KanbanFilters({
               className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 font-medium outline-none focus:border-blue-500 cursor-pointer"
             >
               <option value="this_month">Este Mês</option>
+              <option value="last_month">Mês Anterior</option>
               <option value="today">Hoje</option>
               <option value="yesterday">Ontem</option>
               <option value="last_7">Últimos 7 dias</option>
