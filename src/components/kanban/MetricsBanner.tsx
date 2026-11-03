@@ -38,15 +38,18 @@ export default function MetricsBanner({
     return leadUnit.toLowerCase() === selectedUnit.toLowerCase();
   });
 
-  // 2. EXTRAÇÃO DAS MÉTRICAS
+  // 2. EXTRAÇÃO DAS MÉTRICAS (Sincronizadas com as colunas reais do Kanban)
   const totalLeads = dbMetrics?.total_leads ?? leadsUnidade.length;
-  const agendados = dbMetrics?.agendados ?? leadsUnidade.filter((l) => l.status === 'agendado').length;
-  const confirmados = dbMetrics?.confirmados ?? leadsUnidade.filter((l) => l.status === 'confirmado').length;
-  const compareceram = dbMetrics?.compareceram ?? leadsUnidade.filter((l) => l.status === 'na_clinica').length;
-  const vendidos = dbMetrics?.vendidos ?? leadsUnidade.filter((l) => l.status === 'vendido').length;
+  const agendados = dbMetrics?.agendados ?? leadsUnidade.filter((l) => {
+    const s = (l.status || '').toLowerCase().trim();
+    return s === 'agendado' || s === 'agendado_clinica';
+  }).length;
+  const confirmados = dbMetrics?.confirmados ?? leadsUnidade.filter((l) => (l.status || '').toLowerCase().trim() === 'confirmado').length;
+  const compareceram = dbMetrics?.compareceram ?? leadsUnidade.filter((l) => (l.status || '').toLowerCase().trim() === 'na_clinica').length;
+  const vendidos = dbMetrics?.vendidos ?? leadsUnidade.filter((l) => (l.status || '').toLowerCase().trim() === 'vendido').length;
   
   const faturamento = dbMetrics?.faturamento_total ?? leadsUnidade.reduce((acc, l) => {
-    if (l.status === 'vendido') {
+    if ((l.status || '').toLowerCase().trim() === 'vendido') {
       return acc + parseValorMonetario(l.valor_venda);
     }
     return acc;

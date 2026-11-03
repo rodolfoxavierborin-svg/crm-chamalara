@@ -7,7 +7,6 @@ import { DragDropContext } from '@hello-pangea/dnd';
 import {
   COLUNAS,
   LISTA_UNIDADES,
-  getIsoDateBounds,
   getHorasParado,
   getTempoCronologicoKanban,
   formatarMoeda,
@@ -43,7 +42,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const [unidadeFilter, setUnidadeFilter] = useState('all');
   const [activeTab, setActiveTab] = useState<'kanban' | 'analytics' | 'calendar'>('kanban');
   const [isNewPatientModalOpen, setIsNewPatientModalOpen] = useState(false);
-  const [dbMetrics, setDbMetrics] = useState({ total_leads: 0, agendados: 0, confirmados: 0, compareceram: 0, vendidos: 0, faturamento_total: 0 });
 
   // 🛡️ CONTROLE DE PERMISSÕES POR CARGO (EXATO PELAS OPÇÕES DO SISTEMA)
   const cargoNormalized = userProfile?.cargo?.toLowerCase().trim() || '';
@@ -56,26 +54,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
   const userUnidade = userProfile?.unidade || 'all';
   const targetUnidade = (!isAdmin && userUnidade && userUnidade !== 'Todas' && userUnidade !== 'all') ? userUnidade : unidadeFilter;
-
-  const fetchDbMetrics = useCallback(async () => {
-    const bounds = getIsoDateBounds(dateRange, customStart, customEnd);
-    const { data, error } = await supabase.rpc('get_kanban_metrics', {
-      p_unidade: targetUnidade,
-      p_start_date: dateRange === 'all' ? '2000-01-01T00:00:00Z' : bounds.startIso,
-      p_end_date: dateRange === 'all' ? '2100-01-01T23:59:59Z' : bounds.endIso
-    });
-    if (!error && data && data.length > 0) {
-      const m = data[0];
-      setDbMetrics({
-        total_leads: Number(m.total_leads) || 0,
-        agendados: Number(m.agendados) || 0,
-        confirmados: Number(m.confirmados) || 0,
-        compareceram: Number(m.compareceram) || 0,
-        vendidos: Number(m.vendidos) || 0,
-        faturamento_total: Number(m.faturamento_total) || 0
-      });
-    }
-  }, [dateRange, customStart, customEnd, targetUnidade]);
 
   useEffect(() => {
     if (!isAdmin && userUnidade && userUnidade !== 'Todas' && userUnidade !== 'all') setUnidadeFilter(userUnidade);
@@ -105,11 +83,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
     return () => { supabase.removeChannel(channel); };
   }, [fetchLeads]);
-
-  // 2. RECARREGA RPC AO ALTERAR FILTROS
-  useEffect(() => {
-    fetchDbMetrics();
-  }, [fetchDbMetrics]);
 
   // 🛡️ ARRASTO COM BLOQUEIO DE SEGURANÇA E TRAVAS DE USUÁRIO
   const handleDragEnd = async (result: any) => {
@@ -198,9 +171,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       setLeadDrawer((prev: any) => (prev ? { ...prev, ...updates } : null));
     }
 
-    // Persistência no Supabase e Atualização das Métricas
+    // Persistência no Supabase
     await supabase.from('dentup_leads').update(updates).eq('id', draggableId);
-    fetchDbMetrics();
   };
 
   const handleUpdateLead = async (campoOuObjeto: string | Record<string, any>, valor?: any) => {
@@ -213,7 +185,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     setLeadDrawer((prev: any) => (prev ? { ...prev, ...updates } : null));
     setLeads((prev = []) => prev.map((l) => (String(l.id) === String(leadDrawer.id) ? { ...l, ...updates } : l)));
     await supabase.from('dentup_leads').update(updates).eq('id', leadDrawer.id);
-    fetchDbMetrics();
   };
 
   const handlePatientCreated = (newPatient: any) => {
@@ -221,7 +192,6 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       setLeads((prev = []) => prev.some((l) => String(l.id) === String(newPatient.id)) ? prev.map((l) => (String(l.id) === String(newPatient.id) ? { ...l, ...newPatient } : l)) : [newPatient, ...prev]);
     }
     fetchLeads();
-    fetchDbMetrics();
   };
 
   // FILTRO DE UNIDADES RESILIENTE ("Todas as Unidades", "all", "Todas")
@@ -245,22 +215,47 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     );
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
-  // Sincroniza métricas de vendas fechadas e faturamento estritamente pela data_venda no período
+  // Sincronização determinística e instantânea de TODAS as métricas do Kanban
+  // Fonte única da verdade: leadsVisiveisKanban (exatamente os cards que o usuário está visualizando)
   const effectiveMetrics = useMemo(() => {
-    const vendidosPeriodo = leadsVisiveisKanban.filter(
+    const leads = leadsVisiveisKanban || [];
+
+    // Agendados: soma exata das colunas Agendados (Lara) e Agendados (Clínica)
+    const agendadosCards = leads.filter((l) => {
+      const st = (l.status || '').toLowerCase().trim();
+      return st === 'agendado' || st === 'agendado_clinica';
+    });
+
+    // Confirmados
+    const confirmadosCards = leads.filter(
+      (l) => (l.status || '').toLowerCase().trim() === 'confirmado'
+    );
+
+    // Compareceram (Na Clínica)
+    const compareceramCards = leads.filter(
+      (l) => (l.status || '').toLowerCase().trim() === 'na_clinica'
+    );
+
+    // Tratamento Fechado (Vendido)
+    const vendidosCards = leads.filter(
       (l) => (l.status || '').toLowerCase().trim() === 'vendido'
     );
-    const faturamentoPeriodo = vendidosPeriodo.reduce(
+
+    // Faturamento total das vendas fechadas no período
+    const faturamentoPeriodo = vendidosCards.reduce(
       (acc, l) => acc + parseValorMonetario(l.valor_venda),
       0
     );
 
     return {
-      ...dbMetrics,
-      vendidos: vendidosPeriodo.length,
+      total_leads: leads.length,
+      agendados: agendadosCards.length,
+      confirmados: confirmadosCards.length,
+      compareceram: compareceramCards.length,
+      vendidos: vendidosCards.length,
       faturamento_total: faturamentoPeriodo,
     };
-  }, [dbMetrics, leadsVisiveisKanban]);
+  }, [leadsVisiveisKanban]);
 
   // BUSCA HIGIENIZADA DE TEXTO E TELEFONES
   const leadsFiltrados = useMemo(() => {

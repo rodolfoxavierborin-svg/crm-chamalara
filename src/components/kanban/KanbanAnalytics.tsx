@@ -82,14 +82,14 @@ export default function KanbanAnalytics({
     );
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
-  // 2. FUNIL DE CONVERSÃO COMERCIAL DA CLÍNICA (SINCRO SUPABASE)
+  // 2. FUNIL DE CONVERSÃO COMERCIAL DA CLÍNICA (DETERMINÍSTICO VIA LEADS DO PERÍODO)
   const funil = useMemo(() => {
-    const total = dbMetrics?.total_leads ?? leadsPeriodo.length;
-    const agendados = dbMetrics?.agendados ?? leadsPeriodo.filter((l) => ['agendado', 'agendado_clinica', 'confirmado', 'na_clinica', 'vendido'].includes(l.status)).length;
-    const confirmados = dbMetrics?.confirmados ?? leadsPeriodo.filter((l) => ['confirmado', 'na_clinica', 'vendido'].includes(l.status)).length;
-    const compareceram = dbMetrics?.compareceram ?? leadsPeriodo.filter((l) => ['na_clinica', 'vendido'].includes(l.status)).length;
-    const vendidos = dbMetrics?.vendidos ?? leadsPeriodo.filter((l) => l.status === 'vendido').length;
-    const faturamentoTotal = dbMetrics?.faturamento_total ?? leadsPeriodo.filter((l) => l.status === 'vendido').reduce((acc, l) => acc + parseValorMonetario(l.valor_venda), 0);
+    const total = leadsPeriodo.length;
+    const agendados = leadsPeriodo.filter((l) => ['agendado', 'agendado_clinica', 'confirmado', 'na_clinica', 'vendido'].includes((l.status || '').toLowerCase().trim())).length;
+    const confirmados = leadsPeriodo.filter((l) => ['confirmado', 'na_clinica', 'vendido'].includes((l.status || '').toLowerCase().trim())).length;
+    const compareceram = leadsPeriodo.filter((l) => ['na_clinica', 'vendido'].includes((l.status || '').toLowerCase().trim())).length;
+    const vendidos = leadsPeriodo.filter((l) => (l.status || '').toLowerCase().trim() === 'vendido').length;
+    const faturamentoTotal = leadsPeriodo.filter((l) => (l.status || '').toLowerCase().trim() === 'vendido').reduce((acc, l) => acc + parseValorMonetario(l.valor_venda), 0);
 
     const ticketMedio = vendidos > 0 ? faturamentoTotal / vendidos : 0;
     const taxaConversaoGlobal = total > 0 ? ((vendidos / total) * 100).toFixed(1) : '0.0';
@@ -104,7 +104,7 @@ export default function KanbanAnalytics({
       ticketMedio,
       taxaConversaoGlobal
     };
-  }, [dbMetrics, leadsPeriodo]);
+  }, [leadsPeriodo]);
 
   // 3. DEMANDA POR PROCEDIMENTO
   const demandasProcedimento = useMemo(() => {
