@@ -409,9 +409,14 @@ export default function LeadDrawer({
           {/* SEÇÃO FINANCEIRA / TRATAMENTO FECHADO */}
           <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200/80 space-y-4">
             <div>
-              <label className="text-xs font-bold text-emerald-800 uppercase block mb-1 flex items-center gap-1.5">
-                <span>💰 Valor do Tratamento Fechado (R$)</span>
-              </label>
+              <div className="flex justify-between items-center mb-1">
+                <label className="text-xs font-bold text-emerald-800 uppercase flex items-center gap-1.5">
+                  <span>💰 Valor do Tratamento Fechado (R$)</span>
+                </label>
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                  Obrigatório p/ Venda
+                </span>
+              </div>
               <input 
                 type="text" 
                 disabled={isLockedByOther}
@@ -430,6 +435,9 @@ export default function LeadDrawer({
                 }} 
                 className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-extrabold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm disabled:bg-slate-50 disabled:cursor-not-allowed" 
               />
+              <p className="text-[10px] text-emerald-600 mt-1 italic">
+                Cards sem este valor preenchido não podem ser movidos para "Tratamento Fechado".
+              </p>
             </div>
 
             <div>

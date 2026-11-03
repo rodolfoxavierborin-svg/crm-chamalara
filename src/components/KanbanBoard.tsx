@@ -149,6 +149,17 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       return;
     }
 
+    // TRAVA 4: EXIGÊNCIA OBRIGATÓRIA DE VALOR DE VENDA (Proteção de Métricas)
+    if (statusDestino === 'vendido') {
+      const valorVendaAtual = parseValorMonetario(leadEncontrado.valor_venda);
+      if (!valorVendaAtual || valorVendaAtual <= 0) {
+        alert('💰 Ação Bloqueada: Para mover para "Tratamento Fechado", é obrigatório preencher o "Valor do Tratamento Fechado (R$)" na ficha do paciente.');
+        // Abre automaticamente o drawer do lead com foco na ficha para o atendente preencher
+        setLeadDrawer(leadEncontrado);
+        return;
+      }
+    }
+
     const agoraISO = new Date().toISOString();
     const updates: any = { status: statusDestino, data_movimentacao: agoraISO };
 
