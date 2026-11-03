@@ -347,7 +347,14 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           onSelectLead={onSelectLead} 
           userProfile={userProfile}
         />
-        <CreatePatientModal isOpen={isNewPatientModalOpen} onClose={() => setIsNewPatientModalOpen(false)} onPatientCreated={handlePatientCreated} isAdmin={isAdmin} userUnidade={userUnidade} />
+        <CreatePatientModal 
+          isOpen={isNewPatientModalOpen} 
+          onClose={() => setIsNewPatientModalOpen(false)} 
+          onPatientCreated={handlePatientCreated} 
+          isAdmin={isAdmin} 
+          userUnidade={userUnidade} 
+          userProfile={userProfile} 
+        />
       </div>
       <style dangerouslySetInnerHTML={{__html: `.custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; } .custom-scrollbar::-webkit-scrollbar-track { background: transparent; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94A3B8; }`}} />
     </div>

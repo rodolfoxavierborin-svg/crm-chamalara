@@ -102,7 +102,7 @@ export default function KanbanCard({
   
   // Verificação de posse do card
   const leadRespId = lead?.responsavel_id;
-  const leadRespNome = lead?.responsavel_nome;
+  const leadRespNome = lead?.responsavel_nome || lead?.pausado_por;
   const currentUserId = userProfile?.id;
   const isOwner = currentUserId && leadRespId && String(currentUserId) === String(leadRespId);
   const isLockedByOther = leadRespId && currentUserId && String(leadRespId) !== String(currentUserId) && !isManagerOrAdmin;

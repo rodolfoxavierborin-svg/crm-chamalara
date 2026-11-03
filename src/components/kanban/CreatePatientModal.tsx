@@ -27,6 +27,7 @@ interface CreatePatientModalProps {
   onPatientCreated: (newPatient: any) => void;
   isAdmin: boolean;
   userUnidade?: string;
+  userProfile?: any;
 }
 
 export default function CreatePatientModal({
@@ -34,13 +35,19 @@ export default function CreatePatientModal({
   onClose,
   onPatientCreated,
   isAdmin,
-  userUnidade = 'Santo André'
+  userUnidade = 'Santo André',
+  userProfile
 }: CreatePatientModalProps) {
   const defaultUnidade = !isAdmin && userUnidade && userUnidade !== 'all' && userUnidade !== 'Todas'
     ? userUnidade
     : 'Santo André';
 
   const [saving, setSaving] = useState(false);
+  const [currentMember, setCurrentMember] = useState<{ id: string | null; nome: string }>({
+    id: userProfile?.id || null,
+    nome: userProfile?.nome || userProfile?.email || ''
+  });
+
   const [form, setForm] = useState({
     name: '',
     phone: '',
@@ -52,6 +59,41 @@ export default function CreatePatientModal({
     valor_venda: '',
     data_venda: ''
   });
+
+  // Busca e sincroniza o perfil do usuário logado conforme cadastrado no Gerenciador de Equipe
+  useEffect(() => {
+    if (userProfile?.nome) {
+      setCurrentMember({
+        id: userProfile.id || null,
+        nome: userProfile.nome
+      });
+      return;
+    }
+
+    if (isOpen) {
+      const carregarUsuarioLogado = async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            const { data: profile } = await supabase
+              .from('dentup_profiles')
+              .select('id, nome, email')
+              .eq('id', session.user.id)
+              .maybeSingle();
+
+            setCurrentMember({
+              id: session.user.id,
+              nome: profile?.nome || session.user.email || 'Usuário'
+            });
+          }
+        } catch (err) {
+          console.error('Erro ao identificar perfil do usuário logado:', err);
+        }
+      };
+
+      carregarUsuarioLogado();
+    }
+  }, [isOpen, userProfile]);
 
   useEffect(() => {
     if (isOpen) {
@@ -99,6 +141,9 @@ export default function CreatePatientModal({
       }
     }
 
+    const responsavelId = currentMember.id || userProfile?.id || null;
+    const responsavelNome = currentMember.nome || userProfile?.nome || userProfile?.email || 'Equipe';
+
     const payload: Record<string, any> = {
       name: form.name.trim(),
       phone: cleanPhone,
@@ -109,8 +154,13 @@ export default function CreatePatientModal({
       valor_venda: valorNum,
       status: dataAgendamentoISO ? 'agendado_clinica' : 'novo',
       tipo_agendamento: 'clinica',
-      agendado_por: 'Recepção / Clínica',
+      agendado_por: responsavelNome,
       is_paused: true,
+      pausado_por: responsavelNome,
+      motivo_pausa: 'Cadastrado manualmente no CRM',
+      data_pausa: agoraISO,
+      responsavel_id: responsavelId,
+      responsavel_nome: responsavelNome,
       created_at: agoraISO,
       data_movimentacao: agoraISO
     };
@@ -166,6 +216,23 @@ export default function CreatePatientModal({
 
         {/* FORMULÁRIO */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+          
+          {/* IDENTIFICAÇÃO DO USUÁRIO LOGADO / RESPONSÁVEL */}
+          <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-base">👤</span>
+              <div className="text-xs">
+                <span className="text-slate-500 font-medium">Cadastrado por: </span>
+                <span className="font-bold text-blue-900">
+                  {currentMember.nome || 'Identificando...'}
+                </span>
+              </div>
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md border border-blue-200">
+              Responsável
+            </span>
+          </div>
+
           <div>
             <label className="text-xs font-bold text-slate-700 uppercase block mb-1">
               Nome Completo <span className="text-red-500">*</span>
