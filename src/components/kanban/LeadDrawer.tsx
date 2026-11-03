@@ -112,7 +112,23 @@ export default function LeadDrawer({
   // Trava de permissão: se o card pertence a outro atendente e o usuário logado não for gestor/admin
   const leadRespId = lead.responsavel_id;
   const currentUserId = userProfile?.id;
-  const isLockedByOther = leadRespId && currentUserId && String(leadRespId) !== String(currentUserId) && !isManagerOrAdmin;
+  const hasResponsible = leadRespId && String(leadRespId).trim() !== '' && String(leadRespId) !== 'null';
+  const isLockedByOther = hasResponsible && currentUserId && String(leadRespId) !== String(currentUserId) && !isManagerOrAdmin;
+
+  // Função exclusiva para Gestor/Admin liberar o card (Resetar Posse)
+  const handleLiberarCard = () => {
+    if (!confirm('Deseja realmente liberar este paciente para a equipe geral? O atendente atual será desvinculado.')) {
+      return;
+    }
+    if (typeof onUpdateLead === 'function') {
+      onUpdateLead({
+        responsavel_id: null,
+        responsavel_nome: null,
+        pausado_por: null,
+        motivo_pausa: null,
+      });
+    }
+  };
 
   const procedimentoAtual = lead.procedimento || 'Não Informado';
   const opcoesProcedimento = OPCOES_PROCEDIMENTO_PADRAO.includes(procedimentoAtual)
@@ -177,9 +193,29 @@ export default function LeadDrawer({
 
         {/* ALERTA DE TRAVA DE SEGURANÇA (SE PERTENCER A OUTRO ATENDENTE) */}
         {isLockedByOther && (
-          <div className="bg-amber-50 border-b border-amber-200 px-8 py-3 flex items-center gap-2 text-xs text-amber-800 font-semibold">
-            <span className="text-base">🔒</span>
-            <span>Card em atendimento por <strong>{lead.responsavel_nome || 'outro colega'}</strong>. Modo somente leitura ativado.</span>
+          <div className="bg-amber-50 border-b border-amber-200 px-8 py-3 flex items-center justify-between gap-2 text-xs text-amber-800 font-semibold">
+            <div className="flex items-center gap-2">
+              <span className="text-base">🔒</span>
+              <span>Card em atendimento por <strong>{lead.responsavel_nome || 'outro colega'}</strong>. Modo somente leitura ativado.</span>
+            </div>
+          </div>
+        )}
+
+        {/* BARRA DE GESTÃO DO ADMINISTRADOR (RESETAR / LIBERAR CARD) */}
+        {isManagerOrAdmin && hasResponsible && (
+          <div className="bg-blue-50/80 border-b border-blue-200 px-8 py-2.5 flex items-center justify-between text-xs text-blue-900 font-semibold">
+            <div className="flex items-center gap-1.5">
+              <span>🛡️</span>
+              <span>Atribuído a: <strong>{lead.responsavel_nome || 'Colaborador'}</strong></span>
+            </div>
+            <button
+              type="button"
+              onClick={handleLiberarCard}
+              className="px-2.5 py-1 bg-white border border-blue-300 hover:bg-blue-100 text-blue-800 rounded-md font-bold text-[11px] transition-all shadow-2xs cursor-pointer"
+              title="Libera o card para que qualquer outro colaborador possa assumir"
+            >
+              🔓 Liberar Card (Resetar)
+            </button>
           </div>
         )}
         

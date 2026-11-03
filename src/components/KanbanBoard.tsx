@@ -132,7 +132,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     // TRAVA 2: POSSE DO USUÁRIO NO CARD (Evita roubo de lead entre atendentes)
     const leadRespId = leadEncontrado.responsavel_id;
     const currentUserId = userProfile?.id;
-    if (leadRespId && currentUserId && String(leadRespId) !== String(currentUserId) && !isManagerOrAdmin) {
+    const hasResponsible = leadRespId && String(leadRespId).trim() !== '' && String(leadRespId) !== 'null';
+    if (hasResponsible && currentUserId && String(leadRespId) !== String(currentUserId) && !isManagerOrAdmin) {
       alert(`🔒 Ação Bloqueada: Este paciente está em atendimento por "${leadEncontrado.responsavel_nome || 'outro colaborador'}". Apenas o responsável ou um Gerente/Admin pode movimentá-lo.`);
       return;
     }
