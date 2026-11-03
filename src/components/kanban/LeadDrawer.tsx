@@ -307,77 +307,52 @@ export default function LeadDrawer({
                 <span>📅 Agendamento de Consulta</span>
               </label>
 
-              {lead.data_agendamento && (
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
-                  (lead.tipo_agendamento || '').toLowerCase() === 'clinica'
-                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                    : 'bg-indigo-100 text-indigo-800 border-indigo-300'
-                }`}>
-                  {(lead.tipo_agendamento || '').toLowerCase() === 'clinica' ? '🏥 Clínica' : '🤖 Lara (IA)'}
-                </span>
-              )}
+              {/* SELO DE AUDITORIA INALTERÁVEL DA ORIGEM */}
+              <span className={`text-[10px] font-bold px-2.5 py-1 rounded-md border flex items-center gap-1.5 ${
+                (lead.tipo_agendamento || 'lara').toLowerCase() === 'clinica'
+                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                  : 'bg-indigo-100 text-indigo-800 border-indigo-300'
+              }`}>
+                {(lead.tipo_agendamento || 'lara').toLowerCase() === 'clinica' ? (
+                  <><span>🏥</span> Agendado pela Clínica (Recepção)</>
+                ) : (
+                  <><span>🤖</span> Agendado pela Lara (IA) 🔒</>
+                )}
+              </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  Origem do Agendamento
-                </label>
-                <select
-                  disabled={isLockedByOther}
-                  value={(lead.tipo_agendamento || 'lara').toLowerCase()}
-                  onChange={(e) => {
-                    const novoTipo = e.target.value;
-                    const updates: any = {
-                      tipo_agendamento: novoTipo,
-                      agendado_por: novoTipo === 'clinica' ? (userProfile?.nome || 'Recepção') : 'Lara (IA)',
-                    };
-                    if (novoTipo === 'clinica' && lead.status === 'agendado') {
-                      updates.status = 'agendado_clinica';
-                    } else if (novoTipo === 'lara' && lead.status === 'agendado_clinica') {
-                      updates.status = 'agendado';
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                Data e Horário da Consulta
+              </label>
+              <input
+                type="datetime-local"
+                disabled={isLockedByOther}
+                defaultValue={formatarDatetimeInput(lead.data_agendamento)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (!val) {
+                    onUpdateLead('data_agendamento', null);
+                    return;
+                  }
+                  const d = new Date(val);
+                  if (!isNaN(d.getTime())) {
+                    const updates: any = { data_agendamento: d.toISOString() };
+                    // Se não tiver tipo de agendamento definido previamente, define pela autoria atual
+                    if (!lead.tipo_agendamento) {
+                      updates.tipo_agendamento = 'clinica';
+                      updates.agendado_por = userProfile?.nome || 'Recepção';
                     }
                     onUpdateLead(updates);
-                  }}
-                  className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 outline-none focus:border-indigo-500 shadow-sm cursor-pointer disabled:bg-slate-50 disabled:cursor-not-allowed"
-                >
-                  <option value="lara">🤖 Agendado pela Lara (IA)</option>
-                  <option value="clinica">🏥 Agendado pela Clínica (Recepção)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  Data e Horário
-                </label>
-                <input
-                  type="datetime-local"
-                  disabled={isLockedByOther}
-                  defaultValue={formatarDatetimeInput(lead.data_agendamento)}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (!val) {
-                      onUpdateLead('data_agendamento', null);
-                      return;
-                    }
-                    const d = new Date(val);
-                    if (!isNaN(d.getTime())) {
-                      const updates: any = { data_agendamento: d.toISOString() };
-                      if (!lead.tipo_agendamento) {
-                        updates.tipo_agendamento = 'clinica';
-                        updates.agendado_por = userProfile?.nome || 'Recepção';
-                      }
-                      onUpdateLead(updates);
-                    }
-                  }}
-                  className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-500 shadow-sm cursor-pointer disabled:bg-slate-50 disabled:cursor-not-allowed"
-                />
-              </div>
+                  }
+                }}
+                className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-500 shadow-sm cursor-pointer disabled:bg-slate-50 disabled:cursor-not-allowed"
+              />
             </div>
 
             {lead.agendado_por && (
-              <p className="text-[10px] text-slate-500 italic">
-                Marcado por: <strong className="text-slate-700">{lead.agendado_por}</strong>
+              <p className="text-[10px] text-slate-500 italic flex items-center gap-1">
+                <span>Certificado por:</span> <strong className="text-slate-700">{lead.agendado_por}</strong>
               </p>
             )}
           </div>

@@ -137,6 +137,17 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       return;
     }
 
+    // TRAVA 3: PROTEÇÃO DETERMINÍSTICA DO AGENDAMENTO DA IA LARA (Antifraude)
+    const tipoAgendamentoAtual = (leadEncontrado.tipo_agendamento || 'lara').toLowerCase().trim();
+    if (
+      statusDestino === 'agendado_clinica' && 
+      tipoAgendamentoAtual === 'lara' && 
+      !isManagerOrAdmin
+    ) {
+      alert('🔒 Ação Bloqueada: Este agendamento foi conquistado pela IA Lara. Atendentes não podem transferir agendamentos da Lara para a Clínica.');
+      return;
+    }
+
     const agoraISO = new Date().toISOString();
     const updates: any = { status: statusDestino, data_movimentacao: agoraISO };
 
