@@ -4,7 +4,11 @@
 
 import React, { useState } from 'react';
 import { toDateStrSP } from '../../utils/dateUtils';
-import { parseValorMonetario } from '../../utils/kanbanUtils';
+import {
+  parseValorMonetario,
+  isLeadAgendadoPelaLara,
+  obterVoucherDoLead
+} from '../../utils/kanbanUtils';
 
 const LISTA_UNIDADES = ['Santo André', 'Diadema', 'Mauá', 'São Mateus'];
 
@@ -86,6 +90,7 @@ const dateInputToISO = (dateStr: string): string | null => {
 
 interface LeadDrawerProps {
   lead: any | null;
+  profiles?: any[];
   onClose: () => void;
   onUpdateLead: (campo: string | Record<string, any>, valor?: any) => void;
   onSelectLead?: (lead: any) => void;
@@ -94,12 +99,12 @@ interface LeadDrawerProps {
 
 export default function LeadDrawer({
   lead,
+  profiles = [],
   onClose,
   onUpdateLead,
   onSelectLead,
   userProfile,
 }: LeadDrawerProps) {
-  // Controle do modal de justificativa para interrupção da IA Lara
   const [showPauseModal, setShowPauseModal] = useState(false);
   const [motivoPausa, setMotivoPausa] = useState(MOTIVOS_PAUSA_PADRAO[0]);
   const [motivoPausaOutro, setMotivoPausaOutro] = useState('');
@@ -109,15 +114,18 @@ export default function LeadDrawer({
   const cargoNorm = (userProfile?.cargo || '').toLowerCase();
   const isManagerOrAdmin = cargoNorm.includes('admin') || cargoNorm.includes('gerente') || cargoNorm.includes('gestor');
 
-  // Trava de permissão: se o card pertence a outro atendente e o usuário logado não for gestor/admin
+  // Trava de permissão de chat: se o card está com IA pausada por outro operador humano
   const leadRespId = lead.responsavel_id;
   const currentUserId = userProfile?.id;
-  const hasResponsible = leadRespId && String(leadRespId).trim() !== '' && String(leadRespId) !== 'null';
+  const hasResponsible = Boolean(lead.is_paused) && leadRespId && String(leadRespId).trim() !== '' && String(leadRespId) !== 'null';
   const isLockedByOther = hasResponsible && currentUserId && String(leadRespId) !== String(currentUserId) && !isManagerOrAdmin;
 
-  // Função exclusiva para Gestor/Admin liberar o card (Resetar Posse)
+  const agendadoPorLara = isLeadAgendadoPelaLara(lead);
+  const voucherDetectado = obterVoucherDoLead(lead);
+
+  // Função exclusiva para Gestor/Admin liberar o card (Resetar Posse de Chat e Venda Indevida)
   const handleLiberarCard = () => {
-    if (!confirm('Deseja realmente liberar este paciente para a equipe geral? O atendente atual será desvinculado.')) {
+    if (!confirm('Deseja realmente liberar este paciente? O operador de chat atual será desvinculado (o agendamento original da Lara permanece protegido).')) {
       return;
     }
     if (typeof onUpdateLead === 'function') {
@@ -140,7 +148,7 @@ export default function LeadDrawer({
     ? OPCOES_FEEDBACK_PADRAO
     : [feedbackAtual, ...OPCOES_FEEDBACK_PADRAO];
 
-  // Confirmação de pausa da IA com registro do motivo e autoria obrigatórios
+  // Confirmação de pausa da IA com registro do motivo e autoria do chat (sem sobrescrever agendamento da Lara)
   const handleConfirmPauseAI = () => {
     const motivoFinal = motivoPausa === 'Outro motivo' 
       ? (motivoPausaOutro.trim() || 'Outro motivo não especificado')
@@ -151,7 +159,7 @@ export default function LeadDrawer({
     const idResponsavel = userProfile?.id || null;
 
     if (typeof onUpdateLead === 'function') {
-      onUpdateLead({
+      const updates: Record<string, any> = {
         is_paused: true,
         responsavel_id: idResponsavel,
         responsavel_nome: nomeResponsavel,
@@ -159,11 +167,22 @@ export default function LeadDrawer({
         pausado_por: nomeResponsavel,
         data_pausa: agoraISO,
         data_movimentacao: agoraISO,
-      });
+      };
+
+      if (agendadoPorLara && lead.voucher) {
+        updates.tipo_agendamento = 'lara';
+        updates.agendado_por = 'Lara (IA)';
+        updates.voucher = lead.voucher;
+      }
+
+      onUpdateLead(updates);
     }
 
     setShowPauseModal(false);
   };
+
+  // Identifica o vendedor selecionado para o select comercial
+  const vendedorAtualNome = lead.vendedor_nome || (lead.status === 'vendido' ? lead.responsavel_nome : '') || '';
 
   return (
     <>
@@ -180,7 +199,7 @@ export default function LeadDrawer({
         <div className="px-8 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
           <div>
             <h3 className="font-bold text-slate-800 text-lg">Ficha do Paciente</h3>
-            <p className="text-xs text-slate-500 mt-0.5">Gestão de Informações & Atendimento</p>
+            <p className="text-xs text-slate-500 mt-0.5">Gestão de Informações, Agendamento & Venda</p>
           </div>
           <button 
             type="button"
@@ -191,30 +210,30 @@ export default function LeadDrawer({
           </button>
         </div>
 
-        {/* ALERTA DE TRAVA DE SEGURANÇA (SE PERTENCER A OUTRO ATENDENTE) */}
+        {/* ALERTA DE TRAVA DE SEGURANÇA (SE PERTENCER A OUTRO ATENDENTE NO CHAT) */}
         {isLockedByOther && (
           <div className="bg-amber-50 border-b border-amber-200 px-8 py-3 flex items-center justify-between gap-2 text-xs text-amber-800 font-semibold">
             <div className="flex items-center gap-2">
               <span className="text-base">🔒</span>
-              <span>Card em atendimento por <strong>{lead.responsavel_nome || 'outro colega'}</strong>. Modo somente leitura ativado.</span>
+              <span>Chat assumido por <strong>{lead.responsavel_nome || 'outro colega'}</strong>. Modo somente leitura ativado.</span>
             </div>
           </div>
         )}
 
         {/* BARRA DE GESTÃO DO ADMINISTRADOR (RESETAR / LIBERAR CARD) */}
-        {isManagerOrAdmin && hasResponsible && (
+        {isManagerOrAdmin && (lead.responsavel_nome || lead.responsavel_id) && (
           <div className="bg-blue-50/80 border-b border-blue-200 px-8 py-2.5 flex items-center justify-between text-xs text-blue-900 font-semibold">
             <div className="flex items-center gap-1.5">
               <span>🛡️</span>
-              <span>Atribuído a: <strong>{lead.responsavel_nome || 'Colaborador'}</strong></span>
+              <span>Vinculado a: <strong>{lead.responsavel_nome || 'Colaborador'}</strong></span>
             </div>
             <button
               type="button"
               onClick={handleLiberarCard}
               className="px-2.5 py-1 bg-white border border-blue-300 hover:bg-blue-100 text-blue-800 rounded-md font-bold text-[11px] transition-all shadow-2xs cursor-pointer"
-              title="Libera o card para que qualquer outro colaborador possa assumir"
+              title="Desvincula o colaborador para limpar posse indevida"
             >
-              🔓 Liberar Card (Resetar)
+              🔓 Desvincular Operador
             </button>
           </div>
         )}
@@ -222,17 +241,17 @@ export default function LeadDrawer({
         {/* CONTEÚDO DO FORMULÁRIO */}
         <div className="p-8 flex-1 overflow-y-auto space-y-6 custom-scrollbar">
           
-          {/* STATUS ATUAL DO ATENDIMENTO (BLINDADO, SEM SELECT NEM BRECHAS) */}
+          {/* STATUS ATUAL DO ATENDIMENTO NO WHATSAPP */}
           <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 flex flex-col gap-2">
             <div className="flex justify-between items-center">
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
-                Canal de Atendimento
+                Canal de Atendimento (Chat)
               </span>
 
               {lead.is_paused ? (
                 <span className="text-[10px] font-bold bg-slate-900 text-white px-2 py-0.5 rounded-md shadow-xs flex items-center gap-1">
                   <span>👤</span>
-                  <span>Atendente: {lead.responsavel_nome || 'Equipe'}</span>
+                  <span>Chat: {lead.responsavel_nome || 'Equipe'}</span>
                 </span>
               ) : (
                 <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-md shadow-xs flex items-center gap-1">
@@ -242,7 +261,6 @@ export default function LeadDrawer({
               )}
             </div>
 
-            {/* AUDITORIA DE MOTIVO DA PAUSA (SE JÁ FOI ASSUMIDO POR HUMANO) */}
             {lead.is_paused && lead.motivo_pausa && (
               <div className="text-[11px] bg-white p-2 rounded-lg border border-slate-200 text-slate-600 mt-1">
                 <span className="font-bold text-slate-700">Motivo da Interrupção:</span> {lead.motivo_pausa}
@@ -336,26 +354,46 @@ export default function LeadDrawer({
             />
           </div>
 
-          {/* SEÇÃO DE AGENDAMENTO (DUPLO: LARA VS CLÍNICA) */}
+          {/* SEÇÃO DE AGENDAMENTO (BLINDAGEM 100% DO VOUCHER VIP E AUTORIA DA LARA) */}
           <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 space-y-3">
             <div className="flex justify-between items-center">
               <label className="text-xs font-bold text-indigo-900 uppercase flex items-center gap-1.5">
-                <span>📅 Agendamento de Consulta</span>
+                <span>📅 Agendamento (Pré-Venda)</span>
               </label>
 
               {/* SELO DE AUDITORIA INALTERÁVEL DA ORIGEM */}
               <span className={`text-[10px] font-bold px-2.5 py-1 rounded-md border flex items-center gap-1.5 ${
-                (lead.tipo_agendamento || 'lara').toLowerCase() === 'clinica'
+                !agendadoPorLara
                   ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
                   : 'bg-indigo-100 text-indigo-800 border-indigo-300'
               }`}>
-                {(lead.tipo_agendamento || 'lara').toLowerCase() === 'clinica' ? (
-                  <><span>🏥</span> Agendado pela Clínica (Recepção)</>
+                {!agendadoPorLara ? (
+                  <><span>🏥</span> Agendado pela Clínica</>
                 ) : (
                   <><span>🤖</span> Agendado pela Lara (IA) 🔒</>
                 )}
               </span>
             </div>
+
+            {/* EXIBIÇÃO DO VOUCHER VIP INVIOLÁVEL */}
+            {agendadoPorLara && voucherDetectado && (
+              <div className="bg-white/90 border border-indigo-200 rounded-lg px-3 py-2 flex items-center justify-between shadow-2xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">🎟️</span>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-slate-400 block leading-none">
+                      Voucher VIP Oficial
+                    </span>
+                    <span className="text-xs font-black font-mono text-indigo-700">
+                      {voucherDetectado}
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
+                  🔒 Autoria Blindada
+                </span>
+              </div>
+            )}
 
             <div>
               <label className="block text-[11px] font-bold text-slate-600 mb-1">
@@ -374,10 +412,17 @@ export default function LeadDrawer({
                   const d = new Date(val);
                   if (!isNaN(d.getTime())) {
                     const updates: any = { data_agendamento: d.toISOString() };
-                    // Se não tiver tipo de agendamento definido previamente, define pela autoria atual
-                    if (!lead.tipo_agendamento) {
+                    // Se já era da Lara com voucher confirmado no chat, preserva 100% a Lara
+                    if (agendadoPorLara && lead.voucher) {
+                      updates.tipo_agendamento = 'lara';
+                      updates.agendado_por = 'Lara (IA)';
+                    } else {
+                      // Se foi a recepção/atendente que definiu o horário, mérito é da atendente/clínica
                       updates.tipo_agendamento = 'clinica';
-                      updates.agendado_por = userProfile?.nome || 'Recepção';
+                      updates.agendado_por = userProfile?.nome || lead.responsavel_nome || 'Recepção';
+                      if (lead.status === 'novo' || lead.status === 'agendado') {
+                        updates.status = 'agendado_clinica';
+                      }
                     }
                     onUpdateLead(updates);
                   }
@@ -386,11 +431,14 @@ export default function LeadDrawer({
               />
             </div>
 
-            {lead.agendado_por && (
-              <p className="text-[10px] text-slate-500 italic flex items-center gap-1">
-                <span>Certificado por:</span> <strong className="text-slate-700">{lead.agendado_por}</strong>
-              </p>
-            )}
+            <p className="text-[10px] text-slate-500 italic flex items-center justify-between">
+              <span>
+                Mérito do Agendamento: <strong className="text-slate-700">{agendadoPorLara ? 'Lara (IA)' : (lead.agendado_por || 'Recepção')}</strong>
+              </span>
+              {agendadoPorLara && (
+                <span className="text-indigo-600 font-semibold">Protegido contra alteração</span>
+              )}
+            </p>
           </div>
 
           {/* ANOTAÇÕES INTERNAS */}
@@ -406,17 +454,22 @@ export default function LeadDrawer({
             />
           </div>
 
-          {/* SEÇÃO FINANCEIRA / TRATAMENTO FECHADO */}
+          {/* SEÇÃO FINANCEIRA / FECHAMENTO COMERCIAL NA CLÍNICA (SEPARADO DO AGENDAMENTO) */}
           <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200/80 space-y-4">
+            <div className="flex justify-between items-center border-b border-emerald-200/60 pb-2">
+              <label className="text-xs font-extrabold text-emerald-900 uppercase flex items-center gap-1.5">
+                <span>💰 Fechamento Comercial (Na Clínica)</span>
+              </label>
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                Etapa de Venda
+              </span>
+            </div>
+
+            {/* VALOR DO TRATAMENTO (SEM APROPRIAÇÃO AUTOMÁTICA OCULTA) */}
             <div>
-              <div className="flex justify-between items-center mb-1">
-                <label className="text-xs font-bold text-emerald-800 uppercase flex items-center gap-1.5">
-                  <span>💰 Valor do Tratamento Fechado (R$)</span>
-                </label>
-                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
-                  Obrigatório p/ Venda
-                </span>
-              </div>
+              <label className="text-[11px] font-bold text-emerald-800 uppercase block mb-1">
+                Valor do Tratamento Fechado (R$)
+              </label>
               <input 
                 type="text" 
                 disabled={isLockedByOther}
@@ -424,24 +477,73 @@ export default function LeadDrawer({
                 defaultValue={lead.valor_venda ? String(lead.valor_venda).replace('.', ',') : ''} 
                 onBlur={(e) => {
                   const valNum = parseValorMonetario(e.target.value);
-                  const updates: Record<string, any> = {
+                  onUpdateLead({
                     valor_venda: valNum > 0 ? valNum : null
-                  };
-                  if (!lead.responsavel_id && userProfile) {
-                    updates.responsavel_id = userProfile.id;
-                    updates.responsavel_nome = userProfile.nome || userProfile.email || 'Atendente';
-                  }
-                  onUpdateLead(updates);
+                  });
                 }} 
                 className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-sm font-extrabold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm disabled:bg-slate-50 disabled:cursor-not-allowed" 
               />
-              <p className="text-[10px] text-emerald-600 mt-1 italic">
-                Cards sem este valor preenchido não podem ser movidos para "Tratamento Fechado".
+            </div>
+
+            {/* SELETOR EXPLÍCITO DE QUEM FECHOU A VENDA NA CLÍNICA */}
+            <div>
+              <label className="text-[11px] font-bold text-emerald-800 uppercase block mb-1">
+                Quem Fechou a Venda na Clínica? (Vendedor / Closer)
+              </label>
+              <select
+                disabled={isLockedByOther}
+                value={vendedorAtualNome}
+                onChange={(e) => {
+                  const nomeEscolhido = e.target.value;
+                  if (!nomeEscolhido) {
+                    onUpdateLead({
+                      vendedor_id: null,
+                      vendedor_nome: null,
+                    });
+                    return;
+                  }
+                  if (nomeEscolhido === 'Equipe da Recepção / Clínicas') {
+                    onUpdateLead({
+                      vendedor_id: null,
+                      vendedor_nome: 'Equipe da Recepção / Clínicas',
+                    });
+                    return;
+                  }
+                  const perfil = profiles.find(
+                    (p) => (p.nome || p.email) === nomeEscolhido
+                  );
+                  onUpdateLead({
+                    vendedor_id: perfil?.id || null,
+                    vendedor_nome: nomeEscolhido,
+                  });
+                }}
+                className="w-full bg-white border border-emerald-300 rounded-lg p-2.5 text-xs font-bold text-emerald-900 outline-none focus:border-emerald-500 shadow-sm cursor-pointer disabled:bg-slate-50"
+              >
+                <option value="">-- Não atribuído / Selecionar Vendedor --</option>
+                {profiles.map((p) => {
+                  const labelNome = p.nome || p.email;
+                  return (
+                    <option key={p.id} value={labelNome}>
+                      👤 {labelNome} ({(p.cargo || 'Colaborador').toUpperCase()})
+                    </option>
+                  );
+                })}
+                {vendedorAtualNome &&
+                  vendedorAtualNome !== 'Equipe da Recepção / Clínicas' &&
+                  !profiles.some((p) => (p.nome || p.email) === vendedorAtualNome) && (
+                    <option value={vendedorAtualNome}>👤 {vendedorAtualNome}</option>
+                  )}
+                <option value="Equipe da Recepção / Clínicas">
+                  🏥 Equipe da Recepção / Clínicas (Geral)
+                </option>
+              </select>
+              <p className="text-[10px] text-emerald-700 mt-1 italic">
+                Define quem recebe o mérito da venda presencial no Analytics, mantendo o agendamento intacto.
               </p>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-emerald-800 uppercase block mb-1 flex items-center gap-1.5">
+              <label className="text-[11px] font-bold text-emerald-800 uppercase block mb-1 flex items-center gap-1.5">
                 <span>📅 Data da Venda</span>
               </label>
               <input 
@@ -471,7 +573,10 @@ export default function LeadDrawer({
                   setShowPauseModal(true);
                 } else {
                   if (typeof onUpdateLead === 'function') {
-                    onUpdateLead('is_paused', false);
+                    onUpdateLead({
+                      is_paused: false,
+                      pausado_por: null,
+                    });
                   }
                 }
               }} 
@@ -481,7 +586,7 @@ export default function LeadDrawer({
                   : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
               }`}
             >
-              {lead.is_paused ? '▶ Retomar IA (Lara)' : '⏸️ Pausar IA (Assumir)'}
+              {lead.is_paused ? '▶ Retomar IA (Lara)' : '⏸️ Pausar IA (Assumir Chat)'}
             </button>
             
             <button 
@@ -504,7 +609,7 @@ export default function LeadDrawer({
             <div className="bg-slate-900 px-6 py-4 text-white flex justify-between items-center">
               <div className="flex items-center gap-2">
                 <span className="text-lg">🤖</span>
-                <h3 className="text-sm font-bold">Interromper IA Lara?</h3>
+                <h3 className="text-sm font-bold">Interromper IA Lara no Chat?</h3>
               </div>
               <button 
                 onClick={() => setShowPauseModal(false)}
@@ -516,12 +621,12 @@ export default function LeadDrawer({
 
             <div className="p-6 space-y-4">
               <p className="text-xs text-slate-600 leading-relaxed">
-                A <strong>Lara (IA)</strong> está conduzindo este paciente no WhatsApp. Para garantir a transparência da equipe e não prejudicar a conversão, registre o motivo da intervenção humana:
+                A <strong>Lara (IA)</strong> está conduzindo este paciente no WhatsApp. Ao assumir o chat, você ficará responsável pelas mensagens, mas <strong>o mérito de agendamento da Lara permanece protegido</strong>:
               </p>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Motivo da Pausa:
+                  Motivo da Intervenção no Chat:
                 </label>
                 <select
                   value={motivoPausa}
@@ -550,7 +655,7 @@ export default function LeadDrawer({
               )}
 
               <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 text-[11px] text-amber-800">
-                <span>🛡️ O lead será atribuído a você (<strong>{userProfile?.nome || 'Seu Usuário'}</strong>) e o histórico de autoria será auditado.</span>
+                <span>🛡️ O chat será atribuído a <strong>{userProfile?.nome || 'Seu Usuário'}</strong> e o histórico será auditado.</span>
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
@@ -566,7 +671,7 @@ export default function LeadDrawer({
                   onClick={handleConfirmPauseAI}
                   className="px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all shadow-sm cursor-pointer"
                 >
-                  Confirmar e Assumir
+                  Confirmar e Assumir Chat
                 </button>
               </div>
             </div>

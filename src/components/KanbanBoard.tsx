@@ -12,7 +12,10 @@ import {
   formatarMoeda,
   parseValorMonetario,
   isLeadWithinPeriod,
-  fetchAllLeadsFromSupabase
+  fetchAllLeadsFromSupabase,
+  isLeadAgendadoPelaLara,
+  obterVoucherDoLead,
+  updateLeadResiliente
 } from '../utils/kanbanUtils';
 import MetricsBanner from './kanban/MetricsBanner';
 import KanbanFilters from './kanban/KanbanFilters';
@@ -21,6 +24,7 @@ import KanbanCalendar from './kanban/KanbanCalendar';
 import KanbanAnalytics from './kanban/KanbanAnalytics';
 import LeadDrawer from './kanban/LeadDrawer';
 import CreatePatientModal from './kanban/CreatePatientModal';
+import CloseSaleModal from './kanban/CloseSaleModal';
 
 // Normalizador Unicode para busca resiliente (fontes de WhatsApp e acentos)
 const normalizarTexto = (texto: string) => {
@@ -33,8 +37,10 @@ const normalizarTexto = (texto: string) => {
 
 export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLead?: (lead: any) => void; userProfile?: any }) {
   const [leads, setLeads] = useState<any[]>([]);
+  const [profiles, setProfiles] = useState<any[]>([]);
   const [isBrowser, setIsBrowser] = useState(false);
   const [leadDrawer, setLeadDrawer] = useState<any | null>(null);
+  const [leadParaFecharVenda, setLeadParaFecharVenda] = useState<any | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [dateRange, setDateRange] = useState('this_month');
   const [customStart, setCustomStart] = useState('');
@@ -58,6 +64,22 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   useEffect(() => {
     if (!isAdmin && userUnidade && userUnidade !== 'Todas' && userUnidade !== 'all') setUnidadeFilter(userUnidade);
   }, [userProfile, isAdmin, userUnidade]);
+
+  // Carregar lista de colaboradores (dentup_profiles) para atribuição de vendas na clínica
+  useEffect(() => {
+    let isMounted = true;
+    const fetchProfiles = async () => {
+      const { data, error } = await supabase
+        .from('dentup_profiles')
+        .select('id, nome, email, cargo, unidade')
+        .order('nome', { ascending: true });
+      if (!error && data && isMounted) {
+        setProfiles(data);
+      }
+    };
+    fetchProfiles();
+    return () => { isMounted = false; };
+  }, []);
 
   // Busca paginada em lotes para não descartar leads antigos com mais de 1000 registros no banco
   const fetchLeads = useCallback(async () => {
@@ -84,7 +106,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     return () => { supabase.removeChannel(channel); };
   }, [fetchLeads]);
 
-  // 🛡️ ARRASTO COM BLOQUEIO DE SEGURANÇA E TRAVAS DE USUÁRIO
+  // 🛡️ ARRASTO COM BLOQUEIO DE SEGURANÇA, IMUTABILIDADE DO VOUCHER LARA E MODAL DE VENDA
   const handleDragEnd = async (result: any) => {
     const { destination, source, draggableId } = result;
     if (!destination || (destination.droppableId === source.droppableId && destination.index === source.index)) return;
@@ -102,67 +124,47 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       return;
     }
 
-    // TRAVA 2: POSSE DO USUÁRIO NO CARD (Evita roubo de lead entre atendentes)
+    // TRAVA 2: POSSE DO OPERADOR NO CHAT (Evita roubo de atendimento ativo no WhatsApp entre atendentes)
     const leadRespId = leadEncontrado.responsavel_id;
     const currentUserId = userProfile?.id;
-    const hasResponsible = leadRespId && String(leadRespId).trim() !== '' && String(leadRespId) !== 'null';
-    if (hasResponsible && currentUserId && String(leadRespId) !== String(currentUserId) && !isManagerOrAdmin) {
-      alert(`🔒 Ação Bloqueada: Este paciente está em atendimento por "${leadEncontrado.responsavel_nome || 'outro colaborador'}". Apenas o responsável ou um Gerente/Admin pode movimentá-lo.`);
+    const hasActiveChatOwner = Boolean(leadEncontrado.is_paused) && leadRespId && String(leadRespId).trim() !== '' && String(leadRespId) !== 'null';
+    if (hasActiveChatOwner && currentUserId && String(leadRespId) !== String(currentUserId) && !isManagerOrAdmin && statusDestino !== 'vendido') {
+      alert(`🔒 Ação Bloqueada: Este paciente está em atendimento no chat por "${leadEncontrado.responsavel_nome || 'outro colaborador'}". Apenas o responsável ou um Gerente/Admin pode movimentá-lo.`);
       return;
     }
 
-    // TRAVA 3: PROTEÇÃO DETERMINÍSTICA DO AGENDAMENTO DA IA LARA (Antifraude)
-    const tipoAgendamentoAtual = (leadEncontrado.tipo_agendamento || 'lara').toLowerCase().trim();
-    if (
-      statusDestino === 'agendado_clinica' && 
-      tipoAgendamentoAtual === 'lara' && 
-      !isManagerOrAdmin
-    ) {
-      alert('🔒 Ação Bloqueada: Este agendamento foi conquistado pela IA Lara. Atendentes não podem transferir agendamentos da Lara para a Clínica.');
+    // TRAVA 3: PROTEÇÃO DO VOUCHER VIP REAL DA LARA
+    const agendadoPelaLara = isLeadAgendadoPelaLara(leadEncontrado);
+    if (statusDestino === 'agendado_clinica' && agendadoPelaLara && leadEncontrado.voucher) {
+      alert(`🔒 Blindagem Ativa: Este agendamento possui Voucher VIP confirmado pela IA Lara (${leadEncontrado.voucher}). O mérito do agendamento da Lara é imutável.`);
       return;
     }
 
-    // TRAVA 4: EXIGÊNCIA OBRIGATÓRIA DE VALOR DE VENDA (Proteção de Métricas)
+    // TRAVA 4: CHECK-OUT COMERCIAL OBRIGATÓRIO AO MOVER PARA "TRATAMENTO FECHADO"
     if (statusDestino === 'vendido') {
-      const valorVendaAtual = parseValorMonetario(leadEncontrado.valor_venda);
-      if (!valorVendaAtual || valorVendaAtual <= 0) {
-        alert('💰 Ação Bloqueada: Para mover para "Tratamento Fechado", é obrigatório preencher o "Valor do Tratamento Fechado (R$)" na ficha do paciente.');
-        // Abre automaticamente o drawer do lead com foco na ficha para o atendente preencher
-        setLeadDrawer(leadEncontrado);
-        return;
-      }
+      setLeadParaFecharVenda(leadEncontrado);
+      return;
     }
 
     const agoraISO = new Date().toISOString();
-    const updates: any = { status: statusDestino, data_movimentacao: agoraISO };
+    const updates: Record<string, any> = { status: statusDestino, data_movimentacao: agoraISO };
 
-    // ATRIBUIÇÃO AUTOMÁTICA DE AGENDAMENTO (LARA VS CLÍNICA)
-    if (statusDestino === 'agendado_clinica') {
+    // ATRIBUIÇÃO E PRESERVAÇÃO DETERMINÍSTICA DE AGENDAMENTO (LARA VS CLÍNICA)
+    if (statusDestino === 'agendado_clinica' || (!agendadoPelaLara && statusDestino === 'agendado')) {
+      // Se não tem voucher real da Lara, qualquer agendamento pertence à recepção/clínica
+      updates.status = 'agendado_clinica';
       updates.tipo_agendamento = 'clinica';
-      updates.agendado_por = userProfile?.nome || 'Recepção';
+      updates.agendado_por = leadEncontrado.agendado_por && !leadEncontrado.agendado_por.toLowerCase().includes('lara')
+        ? leadEncontrado.agendado_por
+        : (userProfile?.nome || leadEncontrado.responsavel_nome || 'Recepção');
       if (!leadEncontrado.data_agendamento) {
         updates.data_agendamento = agoraISO;
       }
-    } else if (statusDestino === 'agendado') {
+    } else if (agendadoPelaLara) {
       updates.tipo_agendamento = 'lara';
       updates.agendado_por = 'Lara (IA)';
-    }
-
-    // PRESERVAÇÃO HISTÓRICA NO FUSO DE SÃO PAULO: Grava a data_venda apenas na primeira conversão
-    if (statusDestino === 'vendido') {
-      if (!leadEncontrado.data_venda) {
-        const spToday = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
-        updates.data_venda = `${spToday}T12:00:00-03:00`;
-      }
-      // ATRIBUIÇÃO AUTOMÁTICA DE RESPONSÁVEL NA VENDA: Vincula ao usuário que fechou
-      if (!leadEncontrado.responsavel_id && userProfile) {
-        updates.responsavel_id = userProfile.id;
-        updates.responsavel_nome = userProfile.nome || userProfile.email || 'Atendente';
-      }
-      // Se não tiver valor de venda preenchido, abre o drawer imediatamente para preenchimento
-      if (!leadEncontrado.valor_venda || parseValorMonetario(leadEncontrado.valor_venda) === 0) {
-        setLeadDrawer({ ...leadEncontrado, ...updates });
-      }
+      const voucher = obterVoucherDoLead(leadEncontrado);
+      if (voucher) updates.voucher = voucher;
     }
 
     // Atualização Otimista no Estado Local
@@ -171,8 +173,50 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
       setLeadDrawer((prev: any) => (prev ? { ...prev, ...updates } : null));
     }
 
-    // Persistência no Supabase
-    await supabase.from('dentup_leads').update(updates).eq('id', draggableId);
+    // Persistência Resiliente no Supabase
+    await updateLeadResiliente(supabase, draggableId, updates);
+  };
+
+  // Confirmação do Modal de Fechamento de Venda (Separação estrita entre Agendador e Vendedor)
+  const handleConfirmSaleModal = async (dadosVenda: {
+    valor_venda: number;
+    vendedor_id: string | null;
+    vendedor_nome: string;
+    procedimento: string;
+    data_venda: string;
+    voucher?: string | null;
+    tipo_agendamento: string;
+    agendado_por: string;
+  }) => {
+    if (!leadParaFecharVenda) return;
+    const targetId = leadParaFecharVenda.id;
+    const agoraISO = new Date().toISOString();
+
+    const updates: Record<string, any> = {
+      status: 'vendido',
+      valor_venda: dadosVenda.valor_venda,
+      vendedor_id: dadosVenda.vendedor_id,
+      vendedor_nome: dadosVenda.vendedor_nome,
+      procedimento: dadosVenda.procedimento,
+      data_venda: dadosVenda.data_venda,
+      data_movimentacao: agoraISO,
+      tipo_agendamento: dadosVenda.tipo_agendamento,
+      agendado_por: dadosVenda.agendado_por,
+    };
+
+    if (dadosVenda.voucher) {
+      updates.voucher = dadosVenda.voucher;
+    }
+
+    setLeads((prev = []) =>
+      prev.map((l) => (String(l.id) === String(targetId) ? { ...l, ...updates } : l))
+    );
+    if (leadDrawer && String(leadDrawer.id) === String(targetId)) {
+      setLeadDrawer((prev: any) => (prev ? { ...prev, ...updates } : null));
+    }
+
+    setLeadParaFecharVenda(null);
+    await updateLeadResiliente(supabase, targetId, updates);
   };
 
   const handleUpdateLead = async (campoOuObjeto: string | Record<string, any>, valor?: any) => {
@@ -180,11 +224,28 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
     const updates: Record<string, any> = typeof campoOuObjeto === 'string'
       ? { [campoOuObjeto]: valor }
-      : campoOuObjeto;
+      : { ...campoOuObjeto };
+
+    // Se é agendamento confirmado da Lara com Voucher, preserva a autoria da IA
+    if (isLeadAgendadoPelaLara(leadDrawer)) {
+      updates.tipo_agendamento = 'lara';
+      updates.agendado_por = 'Lara (IA)';
+      const voucher = obterVoucherDoLead(leadDrawer);
+      if (voucher && !updates.voucher) {
+        updates.voucher = voucher;
+      }
+    } else if (updates.data_agendamento && !leadDrawer.voucher) {
+      // Se não tem voucher e a atendente está agendando, mérito é da atendente / clínica
+      updates.tipo_agendamento = 'clinica';
+      updates.agendado_por = userProfile?.nome || leadDrawer.responsavel_nome || 'Recepção';
+      if (leadDrawer.status === 'agendado' || leadDrawer.status === 'novo') {
+        updates.status = 'agendado_clinica';
+      }
+    }
 
     setLeadDrawer((prev: any) => (prev ? { ...prev, ...updates } : null));
     setLeads((prev = []) => prev.map((l) => (String(l.id) === String(leadDrawer.id) ? { ...l, ...updates } : l)));
-    await supabase.from('dentup_leads').update(updates).eq('id', leadDrawer.id);
+    await updateLeadResiliente(supabase, leadDrawer.id, updates);
   };
 
   const handlePatientCreated = (newPatient: any) => {
@@ -216,32 +277,26 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   }, [leadsNaUnidadeGlobal, dateRange, customStart, customEnd]);
 
   // Sincronização determinística e instantânea de TODAS as métricas do Kanban
-  // Fonte única da verdade: leadsVisiveisKanban (exatamente os cards que o usuário está visualizando)
   const effectiveMetrics = useMemo(() => {
     const leads = leadsVisiveisKanban || [];
 
-    // Agendados: soma exata das colunas Agendados (Lara) e Agendados (Clínica)
     const agendadosCards = leads.filter((l) => {
       const st = (l.status || '').toLowerCase().trim();
       return st === 'agendado' || st === 'agendado_clinica';
     });
 
-    // Confirmados
     const confirmadosCards = leads.filter(
       (l) => (l.status || '').toLowerCase().trim() === 'confirmado'
     );
 
-    // Compareceram (Na Clínica)
     const compareceramCards = leads.filter(
       (l) => (l.status || '').toLowerCase().trim() === 'na_clinica'
     );
 
-    // Tratamento Fechado (Vendido)
     const vendidosCards = leads.filter(
       (l) => (l.status || '').toLowerCase().trim() === 'vendido'
     );
 
-    // Faturamento total das vendas fechadas no período
     const faturamentoPeriodo = vendidosCards.reduce(
       (acc, l) => acc + parseValorMonetario(l.valor_venda),
       0
@@ -257,7 +312,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     };
   }, [leadsVisiveisKanban]);
 
-  // BUSCA HIGIENIZADA DE TEXTO E TELEFONES
+  // BUSCA HIGIENIZADA DE TEXTO, TELEFONES E VOUCHERS
   const leadsFiltrados = useMemo(() => {
     const termoNorm = normalizarTexto(searchTerm);
     if (!termoNorm) return leadsVisiveisKanban;
@@ -267,14 +322,16 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     return leadsVisiveisKanban.filter((lead) => {
       const nomeNorm = normalizarTexto(lead.name || lead.nome || '');
       const telNumerico = (lead.phone || lead.phone_number || '').replace(/\D/g, '');
+      const voucherNorm = normalizarTexto(obterVoucherDoLead(lead) || '');
 
       const bateuNome = nomeNorm.includes(termoNorm);
+      const bateuVoucher = voucherNorm.includes(termoNorm);
       const bateuTelefone = termoNumerico.length > 0 && (
         telNumerico.includes(termoNumerico) || 
         (termoNumerico.length >= 8 && telNumerico.endsWith(termoNumerico))
       );
 
-      return bateuNome || bateuTelefone;
+      return bateuNome || bateuTelefone || bateuVoucher;
     });
   }, [leadsVisiveisKanban, searchTerm]);
 
@@ -313,11 +370,13 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
                       const st = (l.status || 'novo').toLowerCase().trim();
                       const colId = coluna.id.toLowerCase().trim();
                       if (colId === 'encerrado' || colId === 'encerrados') return st === 'encerrado' || st === 'encerrados';
+                      
+                      // DIVISÃO AUDITADA: SE TEM VOUCHER REAL DA LARA -> COLUNA LARA. SE NÃO -> COLUNA CLÍNICA!
                       if (colId === 'agendado') {
-                        return st === 'agendado' && (l.tipo_agendamento || 'lara').toLowerCase() !== 'clinica';
+                        return isLeadAgendadoPelaLara(l) && (st === 'agendado' || st === 'agendado_clinica');
                       }
                       if (colId === 'agendado_clinica') {
-                        return st === 'agendado_clinica' || (st === 'agendado' && (l.tipo_agendamento || '').toLowerCase() === 'clinica');
+                        return !isLeadAgendadoPelaLara(l) && (st === 'agendado' || st === 'agendado_clinica');
                       }
                       return st === colId;
                     }).sort((a, b) => getTempoCronologicoKanban(b) - getTempoCronologicoKanban(a))}
@@ -342,6 +401,7 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
         <LeadDrawer 
           key={leadDrawer?.id} 
           lead={leadDrawer} 
+          profiles={profiles}
           onClose={() => setLeadDrawer(null)} 
           onUpdateLead={handleUpdateLead} 
           onSelectLead={onSelectLead} 
@@ -355,6 +415,15 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           userUnidade={userUnidade} 
           userProfile={userProfile} 
         />
+        {leadParaFecharVenda && (
+          <CloseSaleModal
+            lead={leadParaFecharVenda}
+            profiles={profiles}
+            userProfile={userProfile}
+            onClose={() => setLeadParaFecharVenda(null)}
+            onConfirmSale={handleConfirmSaleModal}
+          />
+        )}
       </div>
       <style dangerouslySetInnerHTML={{__html: `.custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; } .custom-scrollbar::-webkit-scrollbar-track { background: transparent; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94A3B8; }`}} />
     </div>

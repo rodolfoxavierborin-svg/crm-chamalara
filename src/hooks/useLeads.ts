@@ -5,7 +5,11 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { getUltimaInteracao } from '../utils/dateUtils';
-import { fetchAllLeadsFromSupabase } from '../utils/kanbanUtils';
+import {
+  fetchAllLeadsFromSupabase,
+  extrairVoucherDeTexto,
+  updateLeadResiliente
+} from '../utils/kanbanUtils';
 
 export function useLeads(loadingAuth: boolean) {
   const [leads, setLeads] = useState<any[]>([]);
@@ -52,7 +56,7 @@ export function useLeads(loadingAuth: boolean) {
       })
       .subscribe();
 
-    // 2. WebSocket para atualizar última interação quando chega nova mensagem
+    // 2. WebSocket para atualizar última interação e capturar Voucher VIP automaticamente quando chega nova mensagem
     const globalMessagesChannel = supabase
       .channel('global-messages-sidebar-channel')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dentup_messages' }, (payload: any) => {
@@ -60,17 +64,37 @@ export function useLeads(loadingAuth: boolean) {
         if (!newMsg || !newMsg.session_id) return;
 
         const cleanPhoneFromSession = newMsg.session_id.replace('dentup_', '');
+        const msgContent =
+          typeof newMsg.message === 'string'
+            ? newMsg.message
+            : newMsg.message?.content || newMsg.message?.text || '';
+        const voucherExtraido = extrairVoucherDeTexto(msgContent);
 
         setLeads((currLeads) => {
           return currLeads.map((lead) => {
             const leadPhone = (lead.phone || lead.phone_number || '').replace(/\D/g, '');
             if (leadPhone === cleanPhoneFromSession) {
               const msgDate = newMsg.created_at || new Date().toISOString();
-              return {
+              const updatedLead: any = {
                 ...lead,
                 ultima_interacao: msgDate,
-                'última_interação': msgDate
+                'última_interação': msgDate,
               };
+
+              // Se a Lara acabou de emitir um Voucher VIP no chat, blinda imediatamente o agendamento no banco
+              if (voucherExtraido && lead.voucher !== voucherExtraido) {
+                updatedLead.voucher = voucherExtraido;
+                updatedLead.tipo_agendamento = 'lara';
+                updatedLead.agendado_por = 'Lara (IA)';
+
+                updateLeadResiliente(supabase, lead.id, {
+                  voucher: voucherExtraido,
+                  tipo_agendamento: 'lara',
+                  agendado_por: 'Lara (IA)',
+                }).catch((err) => console.error('Erro ao salvar voucher automático:', err));
+              }
+
+              return updatedLead;
             }
             return lead;
           });

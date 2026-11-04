@@ -13,6 +13,12 @@ import ChatWindow from '../components/chat/ChatWindow';
 import { useLeads } from '../hooks/useLeads';
 import { parseDataSegura } from '../utils/dateUtils';
 import { formatDateSeparator, parseMensagem, isMensagemTecnica } from '../utils/chatUtils';
+import {
+  extrairVoucherDeTexto,
+  isLeadAgendadoPelaLara,
+  obterVoucherDoLead,
+  updateLeadResiliente
+} from '../utils/kanbanUtils';
 
 export default function HomePage() {
   const router = useRouter();
@@ -156,7 +162,7 @@ export default function HomePage() {
     }
   }, [leads, lastMessageMap]);
 
-  // BUSCA E CANAL REALTIME DE MENSAGENS DO LEAD SELECIONADO
+  // BUSCA E CANAL REALTIME DE MENSAGENS DO LEAD SELECIONADO + CAPTURA DE VOUCHER VIP
   useEffect(() => {
     if (!selectedLead || loadingAuth) return;
     const cleanPhone = (selectedLead.phone || selectedLead.phone_number || '').replace(/\D/g, '');
@@ -170,7 +176,31 @@ export default function HomePage() {
         .select('*')
         .eq('session_id', targetSessionId)
         .order('created_at', { ascending: true });
-      if (!error) setMessages(data || []);
+      if (!error && data) {
+        setMessages(data);
+
+        // Verifica se alguma mensagem da IA no histórico já emitiu Voucher VIP e sincroniza com o lead
+        for (const msg of data) {
+          const content =
+            typeof msg.message === 'string'
+              ? msg.message
+              : msg.message?.content || msg.message?.text || '';
+          const v = extrairVoucherDeTexto(content);
+          if (v && selectedLead.voucher !== v) {
+            const voucherUpdates = {
+              voucher: v,
+              tipo_agendamento: 'lara',
+              agendado_por: 'Lara (IA)',
+            };
+            setSelectedLead((prev: any) => (prev ? { ...prev, ...voucherUpdates } : prev));
+            setLeads((prev: any[]) =>
+              prev.map((l) => (l.id === selectedLead.id ? { ...l, ...voucherUpdates } : l))
+            );
+            updateLeadResiliente(supabase, selectedLead.id, voucherUpdates).catch(() => {});
+            break;
+          }
+        }
+      }
     };
     fetchMessages();
 
@@ -220,12 +250,21 @@ export default function HomePage() {
       updates.motivo_pausa = motivo || 'Assumido via Chat de Mensagens';
       updates.responsavel_id = userProfile?.id || null;
       updates.responsavel_nome = nomeResp;
+    } else {
+      updates.pausado_por = null;
+    }
+
+    // Preserva 100% a autoria do agendamento da Lara somente se houver Voucher VIP real
+    if (isLeadAgendadoPelaLara(selectedLead) && selectedLead.voucher) {
+      updates.tipo_agendamento = 'lara';
+      updates.agendado_por = 'Lara (IA)';
+      updates.voucher = selectedLead.voucher;
     }
 
     const updatedLead = { ...selectedLead, ...updates };
     setSelectedLead(updatedLead);
     setLeads((prev: any[]) => prev.map((l) => (l.id === selectedLead.id ? updatedLead : l)));
-    await supabase.from('dentup_leads').update(updates).eq('id', selectedLead.id);
+    await updateLeadResiliente(supabase, selectedLead.id, updates);
   };
 
   const handleSendMessage = async (motivo?: string) => {
@@ -255,10 +294,16 @@ export default function HomePage() {
           responsavel_nome: nomeResp,
         };
 
+        if (isLeadAgendadoPelaLara(selectedLead) && selectedLead.voucher) {
+          pauseUpdates.tipo_agendamento = 'lara';
+          pauseUpdates.agendado_por = 'Lara (IA)';
+          pauseUpdates.voucher = selectedLead.voucher;
+        }
+
         const leadPausado = { ...selectedLead, ...pauseUpdates };
         setSelectedLead(leadPausado);
         setLeads((prev: any[]) => prev.map((l) => (l.id === selectedLead.id ? leadPausado : l)));
-        await supabase.from('dentup_leads').update(pauseUpdates).eq('id', selectedLead.id);
+        await updateLeadResiliente(supabase, selectedLead.id, pauseUpdates);
       }
 
       const { data: insertedMessage, error } = await supabase

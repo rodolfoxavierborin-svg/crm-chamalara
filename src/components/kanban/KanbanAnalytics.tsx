@@ -3,7 +3,14 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { parseDataSegura, getIsoDateBounds, formatarMoeda, isLeadWithinPeriod, parseValorMonetario } from '../../utils/kanbanUtils';
+import {
+  parseDataSegura,
+  formatarMoeda,
+  isLeadWithinPeriod,
+  parseValorMonetario,
+  isLeadAgendadoPelaLara,
+  obterVoucherDoLead
+} from '../../utils/kanbanUtils';
 import { toDateStrSP } from '../../utils/dateUtils';
 
 interface KanbanAnalyticsProps {
@@ -22,17 +29,29 @@ interface KanbanAnalyticsProps {
   };
 }
 
-interface ColaboradorMetrica {
+interface AgendadorMetrica {
   id: string;
   nome: string;
   cargo: string;
   unidade: string;
-  isIA?: boolean;
+  isIA: boolean;
   agendamentos: number;
-  vendas: number;
-  faturamento: number;
-  vendasOriginadas?: number;
-  faturamentoOriginado?: number;
+  vouchersEmitidos: number;
+  comparecimentos: number;
+  vendasOriginadas: number;
+  faturamentoOriginado: number;
+}
+
+interface CloserMetrica {
+  id: string;
+  nome: string;
+  cargo: string;
+  unidade: string;
+  vendasFechadas: number;
+  vendasDeLara: number;
+  vendasDeClinica: number;
+  faturamentoFechado: number;
+  ticketMedio: number;
 }
 
 const MESES_NOMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
@@ -42,7 +61,6 @@ export default function KanbanAnalytics({
   dateRange,
   customStart = '',
   customEnd = '',
-  dbMetrics,
 }: KanbanAnalyticsProps) {
   const [profiles, setProfiles] = useState<any[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(true);
@@ -85,11 +103,19 @@ export default function KanbanAnalytics({
   // 2. FUNIL DE CONVERSÃO COMERCIAL DA CLÍNICA (DETERMINÍSTICO VIA LEADS DO PERÍODO)
   const funil = useMemo(() => {
     const total = leadsPeriodo.length;
-    const agendados = leadsPeriodo.filter((l) => ['agendado', 'agendado_clinica', 'confirmado', 'na_clinica', 'vendido'].includes((l.status || '').toLowerCase().trim())).length;
-    const confirmados = leadsPeriodo.filter((l) => ['confirmado', 'na_clinica', 'vendido'].includes((l.status || '').toLowerCase().trim())).length;
-    const compareceram = leadsPeriodo.filter((l) => ['na_clinica', 'vendido'].includes((l.status || '').toLowerCase().trim())).length;
+    const agendados = leadsPeriodo.filter((l) =>
+      ['agendado', 'agendado_clinica', 'confirmado', 'na_clinica', 'vendido'].includes((l.status || '').toLowerCase().trim())
+    ).length;
+    const confirmados = leadsPeriodo.filter((l) =>
+      ['confirmado', 'na_clinica', 'vendido'].includes((l.status || '').toLowerCase().trim())
+    ).length;
+    const compareceram = leadsPeriodo.filter((l) =>
+      ['na_clinica', 'vendido'].includes((l.status || '').toLowerCase().trim())
+    ).length;
     const vendidos = leadsPeriodo.filter((l) => (l.status || '').toLowerCase().trim() === 'vendido').length;
-    const faturamentoTotal = leadsPeriodo.filter((l) => (l.status || '').toLowerCase().trim() === 'vendido').reduce((acc, l) => acc + parseValorMonetario(l.valor_venda), 0);
+    const faturamentoTotal = leadsPeriodo
+      .filter((l) => (l.status || '').toLowerCase().trim() === 'vendido')
+      .reduce((acc, l) => acc + parseValorMonetario(l.valor_venda), 0);
 
     const ticketMedio = vendidos > 0 ? faturamentoTotal / vendidos : 0;
     const taxaConversaoGlobal = total > 0 ? ((vendidos / total) * 100).toFixed(1) : '0.0';
@@ -117,7 +143,7 @@ export default function KanbanAnalytics({
 
       if (!mapa[proc]) mapa[proc] = { quantidade: 0, faturamento: 0 };
       mapa[proc].quantidade += 1;
-      if (lead.status === 'vendido') {
+      if ((lead.status || '').toLowerCase().trim() === 'vendido') {
         mapa[proc].faturamento += parseValorMonetario(lead.valor_venda);
       }
     });
@@ -133,7 +159,7 @@ export default function KanbanAnalytics({
     return lista.sort((a, b) => b.quantidade - a.quantidade).slice(0, 8);
   }, [leadsPeriodo, funil.total]);
 
-  // 5. BREAKDOWN POR UNIDADE
+  // 4. BREAKDOWN POR UNIDADE
   const performanceUnidades = useMemo(() => {
     const mapa: Record<string, { leads: number; agendados: number; vendidos: number; faturamento: number }> = {};
 
@@ -141,9 +167,12 @@ export default function KanbanAnalytics({
       const uni = lead.unidade || lead.unit || 'Santo André';
       if (!mapa[uni]) mapa[uni] = { leads: 0, agendados: 0, vendidos: 0, faturamento: 0 };
 
+      const st = (lead.status || '').toLowerCase().trim();
       mapa[uni].leads += 1;
-      if (['agendado', 'agendado_clinica', 'confirmado', 'na_clinica', 'vendido'].includes(lead.status)) mapa[uni].agendados += 1;
-      if (lead.status === 'vendido') {
+      if (['agendado', 'agendado_clinica', 'confirmado', 'na_clinica', 'vendido'].includes(st)) {
+        mapa[uni].agendados += 1;
+      }
+      if (st === 'vendido') {
         mapa[uni].vendidos += 1;
         mapa[uni].faturamento += parseValorMonetario(lead.valor_venda);
       }
@@ -157,12 +186,12 @@ export default function KanbanAnalytics({
   }, [leadsPeriodo]);
 
   // =========================================================================
-  // 5. MÉTRICAS INDIVIDUAIS DOS COLABORADORES + IA LARA
+  // 5. QUADRO 1: PERFORMANCE DE AGENDAMENTOS & CAPTAÇÃO (SDR: LARA VS RECEPÇÃO)
   // =========================================================================
-  const metricasColaboradores = useMemo<ColaboradorMetrica[]>(() => {
-    const mapa: Record<string, ColaboradorMetrica> = {};
+  const metricasAgendadores = useMemo<AgendadorMetrica[]>(() => {
+    const mapa: Record<string, AgendadorMetrica> = {};
 
-    // 5.1 Inicializar a IA Lara (foco em agendamentos e originação de vendas)
+    // 5.1 Inicializar IA Lara (Blindada por Voucher VIP e tipo_agendamento)
     mapa['lara_ia'] = {
       id: 'lara_ia',
       nome: 'Lara (IA Inteligência Artificial)',
@@ -170,13 +199,13 @@ export default function KanbanAnalytics({
       unidade: 'Todas',
       isIA: true,
       agendamentos: 0,
-      vendas: 0,
-      faturamento: 0,
+      vouchersEmitidos: 0,
+      comparecimentos: 0,
       vendasOriginadas: 0,
       faturamentoOriginado: 0,
     };
 
-    // 5.2 Inicializar todos os membros cadastrados na equipe
+    // 5.2 Inicializar membros humanos da equipe
     profiles.forEach((p) => {
       const chave = p.id || p.nome?.toLowerCase().trim() || p.email;
       mapa[chave] = {
@@ -186,136 +215,243 @@ export default function KanbanAnalytics({
         unidade: p.unidade || 'Todas',
         isIA: false,
         agendamentos: 0,
-        vendas: 0,
-        faturamento: 0,
+        vouchersEmitidos: 0,
+        comparecimentos: 0,
+        vendasOriginadas: 0,
+        faturamentoOriginado: 0,
       };
     });
 
-    // 5.3 Inicializar Vendas da Recepção / Equipe (para vendas sem atendente nominal vinculado)
-    mapa['equipe_geral'] = {
-      id: 'equipe_geral',
-      nome: 'Equipe da Recepção / Clínicas',
+    // 5.3 Recepção Geral (para agendamentos de clínica sem nome individual vinculado)
+    mapa['recepcao_geral'] = {
+      id: 'recepcao_geral',
+      nome: 'Recepção Geral / Clínica',
       cargo: 'Recepção',
       unidade: 'Todas',
       isIA: false,
       agendamentos: 0,
-      vendas: 0,
-      faturamento: 0,
+      vouchersEmitidos: 0,
+      comparecimentos: 0,
+      vendasOriginadas: 0,
+      faturamentoOriginado: 0,
     };
 
-    // 5.4 Atribuir leads do período
     leadsPeriodo.forEach((lead) => {
-      const respId = lead.responsavel_id;
-      const respNome = lead.responsavel_nome?.toLowerCase().trim();
-      const agendadoPor = (lead.agendado_por || '').toLowerCase().trim();
-      const tipoAgendamento = (lead.tipo_agendamento || '').toLowerCase().trim();
       const statusNorm = (lead.status || '').toLowerCase().trim();
       const isAgendado = ['agendado', 'agendado_clinica', 'confirmado', 'na_clinica', 'vendido'].includes(statusNorm);
+      if (!isAgendado) return;
+
+      const isCompareceu = ['na_clinica', 'vendido'].includes(statusNorm);
       const isVendido = statusNorm === 'vendido';
       const valorVenda = parseValorMonetario(lead.valor_venda);
+      const agendadoPorLara = isLeadAgendadoPelaLara(lead);
 
-      // Localizar o colaborador responsável
-      let colaboradorKey: string | null = null;
-      if (respId && mapa[respId]) {
-        colaboradorKey = respId;
-      } else if (respNome) {
-        const found = Object.keys(mapa).find((k) => mapa[k].nome.toLowerCase().trim() === respNome);
-        if (found) colaboradorKey = found;
-      }
-
-      // Se não encontrou por ID ou nome, mas tem responsável gravado avulso
-      if (!colaboradorKey && respNome) {
-        mapa[respNome] = {
-          id: respNome,
-          nome: lead.responsavel_nome,
-          cargo: 'Colaborador',
-          unidade: lead.unidade || 'Todas',
-          isIA: false,
-          agendamentos: 0,
-          vendas: 0,
-          faturamento: 0,
-        };
-        colaboradorKey = respNome;
-      }
-
-      // Se não há nenhum colaborador responsável vinculado, agrupa na Equipe Geral
-      if (!colaboradorKey) {
-        colaboradorKey = 'equipe_geral';
-      }
-
-      // Contabiliza venda para o colaborador humano / equipe
-      if (colaboradorKey && !mapa[colaboradorKey].isIA) {
-        if (isVendido) {
-          mapa[colaboradorKey].vendas += 1;
-          mapa[colaboradorKey].faturamento += valorVenda;
+      if (agendadoPorLara) {
+        // Mérito 100% blindado para a IA Lara
+        mapa['lara_ia'].agendamentos += 1;
+        if (obterVoucherDoLead(lead)) {
+          mapa['lara_ia'].vouchersEmitidos += 1;
         }
-      }
+        if (isCompareceu) {
+          mapa['lara_ia'].comparecimentos += 1;
+        }
+        if (isVendido) {
+          mapa['lara_ia'].vendasOriginadas += 1;
+          mapa['lara_ia'].faturamentoOriginado += valorVenda;
+        }
+      } else {
+        // Agendado manualmente pela Clínica / Recepção
+        const agendadoPorTexto = (lead.agendado_por || '').toLowerCase().trim();
+        const respNome = (lead.responsavel_nome || '').toLowerCase().trim();
+        const respId = lead.responsavel_id;
 
-      // Atribuição do agendamento (Lara vs Clínica)
-      if (isAgendado) {
-        const agendadoPorClinica = tipoAgendamento === 'clinica' || 
-          agendadoPor.includes('clínica') || 
-          agendadoPor.includes('clinica') ||
-          agendadoPor.includes('recepção') ||
-          agendadoPor.includes('recepcao');
+        let agendadorKey: string | null = null;
 
-        if (agendadoPorClinica) {
-          // Agendado por humano
-          let agendadorKey = colaboradorKey;
-          if (agendadoPor) {
-            const foundAgendador = Object.keys(mapa).find((k) => 
-              mapa[k].nome.toLowerCase().trim().includes(agendadoPor) || agendadoPor.includes(mapa[k].nome.toLowerCase().trim())
-            );
-            if (foundAgendador) agendadorKey = foundAgendador;
-          }
+        // 1º Tenta localizar pelo campo agendado_por
+        if (agendadoPorTexto && !['recepção', 'recepcao', 'clínica', 'clinica'].includes(agendadoPorTexto)) {
+          const foundByAgendador = Object.keys(mapa).find(
+            (k) =>
+              !mapa[k].isIA &&
+              (mapa[k].nome.toLowerCase().trim() === agendadoPorTexto ||
+                mapa[k].nome.toLowerCase().trim().includes(agendadoPorTexto) ||
+                agendadoPorTexto.includes(mapa[k].nome.toLowerCase().trim()))
+          );
+          if (foundByAgendador) agendadorKey = foundByAgendador;
+        }
 
-          if (agendadorKey && mapa[agendadorKey]) {
-            mapa[agendadorKey].agendamentos += 1;
+        // 2º Fallback para responsável do cadastro se for agendamento da clínica
+        if (!agendadorKey && respId && mapa[respId]) {
+          agendadorKey = respId;
+        } else if (!agendadorKey && respNome) {
+          const foundByResp = Object.keys(mapa).find(
+            (k) => !mapa[k].isIA && (mapa[k].nome.toLowerCase().trim() === respNome || respNome.includes(mapa[k].nome.toLowerCase().trim()))
+          );
+          if (foundByResp) {
+            agendadorKey = foundByResp;
+          } else if (lead.responsavel_nome) {
+            mapa[respNome] = {
+              id: respNome,
+              nome: lead.responsavel_nome,
+              cargo: 'Colaborador',
+              unidade: lead.unidade || 'Todas',
+              isIA: false,
+              agendamentos: 0,
+              vouchersEmitidos: 0,
+              comparecimentos: 0,
+              vendasOriginadas: 0,
+              faturamentoOriginado: 0,
+            };
+            agendadorKey = respNome;
           }
-        } else {
-          // Agendado pela Lara (IA)
-          mapa['lara_ia'].agendamentos += 1;
-          if (isVendido) {
-            // Registra a ORIGINAÇÃO da venda pela Lara sem duplicar o faturamento no balanço
-            mapa['lara_ia'].vendasOriginadas = (mapa['lara_ia'].vendasOriginadas || 0) + 1;
-            mapa['lara_ia'].faturamentoOriginado = (mapa['lara_ia'].faturamentoOriginado || 0) + valorVenda;
-          }
+        }
+
+        if (!agendadorKey) {
+          agendadorKey = 'recepcao_geral';
+        }
+
+        mapa[agendadorKey].agendamentos += 1;
+        if (isCompareceu) {
+          mapa[agendadorKey].comparecimentos += 1;
+        }
+        if (isVendido) {
+          mapa[agendadorKey].vendasOriginadas += 1;
+          mapa[agendadorKey].faturamentoOriginado += valorVenda;
         }
       }
     });
 
-    // 5.5 Remover equipe_geral se não tiver tido nenhuma venda ou agendamento
-    if (mapa['equipe_geral'].agendamentos === 0 && mapa['equipe_geral'].vendas === 0) {
-      delete mapa['equipe_geral'];
+    if (mapa['recepcao_geral'].agendamentos === 0) {
+      delete mapa['recepcao_geral'];
     }
 
-    // 5.6 Ordenar colaboradores: Lara e Equipe no topo, seguidos por faturamento decrescente
-    const listaFinal = Object.values(mapa).sort((a, b) => {
+    return Object.values(mapa).sort((a, b) => {
       if (a.isIA) return -1;
       if (b.isIA) return 1;
-      return b.faturamento - a.faturamento;
+      if (b.agendamentos !== a.agendamentos) return b.agendamentos - a.agendamentos;
+      return b.faturamentoOriginado - a.faturamentoOriginado;
     });
-
-    return listaFinal;
   }, [leadsPeriodo, profiles]);
 
   // =========================================================================
-  // 6. RANKING GERAL DE AGENDAMENTOS (LEADERBOARD COM IA LARA)
+  // 6. QUADRO 2: FECHAMENTO COMERCIAL NA CLÍNICA (CLOSERS / VENDEDORES)
+  // =========================================================================
+  const metricasClosers = useMemo<CloserMetrica[]>(() => {
+    const mapa: Record<string, CloserMetrica> = {};
+
+    // Inicializar colaboradores humanos da clínica
+    profiles.forEach((p) => {
+      const chave = p.id || p.nome?.toLowerCase().trim() || p.email;
+      mapa[chave] = {
+        id: p.id,
+        nome: p.nome || p.email || 'Colaborador',
+        cargo: p.cargo || 'usuario',
+        unidade: p.unidade || 'Todas',
+        vendasFechadas: 0,
+        vendasDeLara: 0,
+        vendasDeClinica: 0,
+        faturamentoFechado: 0,
+        ticketMedio: 0,
+      };
+    });
+
+    // Inicializar Equipe da Recepção / Clínicas para vendas sem closer individual
+    mapa['equipe_geral'] = {
+      id: 'equipe_geral',
+      nome: 'Equipe da Recepção / Clínicas',
+      cargo: 'Recepção / Clínica',
+      unidade: 'Todas',
+      vendasFechadas: 0,
+      vendasDeLara: 0,
+      vendasDeClinica: 0,
+      faturamentoFechado: 0,
+      ticketMedio: 0,
+    };
+
+    leadsPeriodo.forEach((lead) => {
+      const statusNorm = (lead.status || '').toLowerCase().trim();
+      if (statusNorm !== 'vendido') return;
+
+      const valorVenda = parseValorMonetario(lead.valor_venda);
+      const veioDaLara = isLeadAgendadoPelaLara(lead);
+
+      // Prioridade estrita para vendedor_id / vendedor_nome (com fallback para responsavel_id/nome em vendas históricas)
+      const vendId = lead.vendedor_id || lead.responsavel_id;
+      const vendNomeRaw = lead.vendedor_nome || lead.responsavel_nome || '';
+      const vendNomeNorm = vendNomeRaw.toLowerCase().trim();
+
+      let closerKey: string | null = null;
+
+      if (vendNomeNorm === 'equipe da recepção / clínicas' || vendNomeNorm === 'equipe geral') {
+        closerKey = 'equipe_geral';
+      } else if (vendId && mapa[vendId]) {
+        closerKey = vendId;
+      } else if (vendNomeNorm) {
+        const found = Object.keys(mapa).find(
+          (k) => mapa[k].nome.toLowerCase().trim() === vendNomeNorm
+        );
+        if (found) {
+          closerKey = found;
+        } else {
+          mapa[vendNomeNorm] = {
+            id: vendNomeNorm,
+            nome: vendNomeRaw,
+            cargo: 'Colaborador',
+            unidade: lead.unidade || 'Todas',
+            vendasFechadas: 0,
+            vendasDeLara: 0,
+            vendasDeClinica: 0,
+            faturamentoFechado: 0,
+            ticketMedio: 0,
+          };
+          closerKey = vendNomeNorm;
+        }
+      } else {
+        closerKey = 'equipe_geral';
+      }
+
+      if (closerKey && mapa[closerKey]) {
+        mapa[closerKey].vendasFechadas += 1;
+        mapa[closerKey].faturamentoFechado += valorVenda;
+        if (veioDaLara) {
+          mapa[closerKey].vendasDeLara += 1;
+        } else {
+          mapa[closerKey].vendasDeClinica += 1;
+        }
+      }
+    });
+
+    if (mapa['equipe_geral'].vendasFechadas === 0) {
+      delete mapa['equipe_geral'];
+    }
+
+    const lista = Object.values(mapa).map((c) => ({
+      ...c,
+      ticketMedio: c.vendasFechadas > 0 ? c.faturamentoFechado / c.vendasFechadas : 0,
+    }));
+
+    return lista.sort((a, b) => {
+      if (b.faturamentoFechado !== a.faturamentoFechado) {
+        return b.faturamentoFechado - a.faturamentoFechado;
+      }
+      return b.vendasFechadas - a.vendasFechadas;
+    });
+  }, [leadsPeriodo, profiles]);
+
+  // =========================================================================
+  // 7. RANKING GERAL DE AGENDAMENTOS (LEADERBOARD TOP 3 COM IA LARA)
   // =========================================================================
   const rankingAgendamentos = useMemo(() => {
-    return [...metricasColaboradores]
-      .filter((c) => c.agendamentos > 0 || c.vendas > 0 || c.isIA)
+    return [...metricasAgendadores]
+      .filter((c) => c.agendamentos > 0 || c.vendasOriginadas > 0 || c.isIA)
       .sort((a, b) => b.agendamentos - a.agendamentos);
-  }, [metricasColaboradores]);
+  }, [metricasAgendadores]);
 
   // =========================================================================
   // 8. COMPARATIVO TEMPORAL DOS ÚLTIMOS MESES (MoM - Month over Month)
   // =========================================================================
   const historicoMensal = useMemo(() => {
     const mapaMeses: Record<string, { chave: string; label: string; ano: number; mes: number; agendados: number; faturamento: number; vendas: number; leads: number }> = {};
-    const hoje = new Date();
 
-    // Gerar os últimos 6 meses estruturados ancorados em São Paulo
     const now = new Date();
     const spNowStr = now.toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
     const [spYear, spMonth] = spNowStr.split('-').map(Number);
@@ -339,9 +475,7 @@ export default function KanbanAnalytics({
       };
     }
 
-    // Distribuir todos os leads da unidade global nos seus respectivos meses de ocorrência (Fuso SP)
     leadsNaUnidadeGlobal.forEach((lead) => {
-      // 1. Data de entrada do lead
       const dtCreated = parseDataSegura(lead.created_at);
       if (dtCreated > 0) {
         const chave = toDateStrSP(dtCreated).slice(0, 7);
@@ -350,7 +484,6 @@ export default function KanbanAnalytics({
         }
       }
 
-      // 2. Data de Agendamento
       const st = (lead.status || '').toLowerCase().trim();
       const isAgendado = ['agendado', 'agendado_clinica', 'confirmado', 'na_clinica', 'vendido'].includes(st);
       if (isAgendado) {
@@ -363,7 +496,6 @@ export default function KanbanAnalytics({
         }
       }
 
-      // 3. Data de Venda / Faturamento (Estrito no Fuso SP)
       if (st === 'vendido') {
         const dtVenda = parseDataSegura(lead.data_venda || lead.data_movimentacao || lead.created_at);
         if (dtVenda > 0) {
@@ -378,7 +510,6 @@ export default function KanbanAnalytics({
 
     const lista = Object.values(mapaMeses);
 
-    // Calcular crescimento percentual mês contra mês (MoM)
     return lista.map((m, idx) => {
       const mesAnterior = idx > 0 ? lista[idx - 1] : null;
       let crescFaturamento = 0;
@@ -399,15 +530,12 @@ export default function KanbanAnalytics({
     });
   }, [leadsNaUnidadeGlobal]);
 
-  // Altura máxima para normalizar o gráfico em barras (SVG / HTML)
   const maxFaturamento = useMemo(() => {
-    const max = Math.max(...historicoMensal.map((m) => m.faturamento), 1000);
-    return max;
+    return Math.max(...historicoMensal.map((m) => m.faturamento), 1000);
   }, [historicoMensal]);
 
   const maxAgendamentos = useMemo(() => {
-    const max = Math.max(...historicoMensal.map((m) => m.agendados), 10);
-    return max;
+    return Math.max(...historicoMensal.map((m) => m.agendados), 10);
   }, [historicoMensal]);
 
   return (
@@ -450,16 +578,18 @@ export default function KanbanAnalytics({
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Tratamentos Fechados</span>
-            <div className="p-2 bg-teal-50 text-teal-600 rounded-xl">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">ROI Originado pela IA Lara</span>
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+              <span className="text-base">🤖</span>
             </div>
           </div>
           <div className="mt-4">
-            <span className="text-2xl font-black text-slate-900">{funil.vendidos}</span>
-            <span className="block text-xs font-semibold text-teal-600 mt-1">Contratos fechados no período</span>
+            <span className="text-2xl font-black text-indigo-700">
+              {formatarMoeda(metricasAgendadores.find((a) => a.isIA)?.faturamentoOriginado || 0)}
+            </span>
+            <span className="block text-xs font-semibold text-indigo-600 mt-1">
+              {metricasAgendadores.find((a) => a.isIA)?.vendasOriginadas || 0} vendas vieram de agendamentos da Lara
+            </span>
           </div>
         </div>
 
@@ -481,7 +611,7 @@ export default function KanbanAnalytics({
       </div>
 
       {/* =========================================================================
-          SEÇÃO NOVO 1: COMPARATIVO DOS ÚLTIMOS MESES (MoM) COM GRÁFICO VISUAL
+          SEÇÃO 2: COMPARATIVO DOS ÚLTIMOS MESES (MoM) COM GRÁFICO VISUAL
           ========================================================================= */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
@@ -508,7 +638,6 @@ export default function KanbanAnalytics({
           </div>
         </div>
 
-        {/* GRÁFICO HISTÓRICO DE BARRAS / EVOLUÇÃO */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 pt-4">
           {historicoMensal.map((m, idx) => {
             const pctFaturamento = Math.round((m.faturamento / maxFaturamento) * 100);
@@ -516,7 +645,6 @@ export default function KanbanAnalytics({
 
             return (
               <div key={m.chave} className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/60 flex flex-col justify-between hover:border-blue-300 transition-all">
-                {/* Cabeçalho do Mês */}
                 <div className="flex justify-between items-center mb-3">
                   <span className="text-xs font-black uppercase text-slate-800">{m.label}</span>
                   {idx > 0 && m.crescFaturamento !== 0 && (
@@ -528,9 +656,7 @@ export default function KanbanAnalytics({
                   )}
                 </div>
 
-                {/* Barras Visuais */}
                 <div className="h-32 flex items-end justify-center gap-2 py-2 border-b border-slate-200">
-                  {/* Barra Faturamento */}
                   <div className="flex-1 flex flex-col items-center justify-end h-full">
                     <span className="text-[9px] font-bold text-blue-700 mb-1">{m.vendas}v</span>
                     <div 
@@ -540,7 +666,6 @@ export default function KanbanAnalytics({
                     ></div>
                   </div>
 
-                  {/* Barra Agendamentos */}
                   <div className="flex-1 flex flex-col items-center justify-end h-full">
                     <span className="text-[9px] font-bold text-emerald-700 mb-1">{m.agendados}ag</span>
                     <div 
@@ -551,7 +676,6 @@ export default function KanbanAnalytics({
                   </div>
                 </div>
 
-                {/* Resumo Numérico do Mês */}
                 <div className="mt-3 space-y-1 text-center">
                   <span className="block text-xs font-black text-slate-900 truncate" title={formatarMoeda(m.faturamento)}>
                     {formatarMoeda(m.faturamento)}
@@ -568,7 +692,7 @@ export default function KanbanAnalytics({
       </div>
 
       {/* =========================================================================
-          SEÇÃO NOVO 2: RANKING GERAL DE AGENDAMENTOS (LEADERBOARD DA EQUIPE + LARA)
+          SEÇÃO 3: RANKING GERAL DE AGENDAMENTOS (LEADERBOARD TOP 3)
           ========================================================================= */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
@@ -579,10 +703,10 @@ export default function KanbanAnalytics({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
                 </svg>
               </span>
-              <h3 className="text-base font-extrabold text-slate-900">Ranking Geral de Agendamentos (Leaderboard)</h3>
+              <h3 className="text-base font-extrabold text-slate-900">Pódio de Agendamentos (Top Captação)</h3>
             </div>
             <p className="text-xs text-slate-500 font-medium mt-1">
-              Disputa saudável de agendamentos entre a equipe humana e a Inteligência Artificial Lara
+              Líderes em trazer pacientes agendados para dentro da clínica (IA Lara + Recepção)
             </p>
           </div>
           <span className="text-xs font-bold px-3 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-full">
@@ -590,7 +714,6 @@ export default function KanbanAnalytics({
           </span>
         </div>
 
-        {/* PÓDIO E CARDS DOS TOP 3 */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {rankingAgendamentos.slice(0, 3).map((item, index) => {
             const medalhas = ['🥇 1º Lugar', '🥈 2º Lugar', '🥉 3º Lugar'];
@@ -611,11 +734,11 @@ export default function KanbanAnalytics({
                   </span>
                   {item.isIA ? (
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 border border-indigo-200">
-                      🤖 IA Automação
+                      🤖 IA Automação (Voucher VIP)
                     </span>
                   ) : (
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">
-                      👤 Atendente
+                      👤 Recepção / Clínica
                     </span>
                   )}
                 </div>
@@ -627,15 +750,15 @@ export default function KanbanAnalytics({
 
                 <div className="flex items-center justify-between pt-3 border-t border-slate-200/60">
                   <div>
-                    <span className="block text-[10px] uppercase font-bold text-slate-400">Agendamentos</span>
-                    <span className="text-xl font-black text-slate-900">{item.agendamentos}</span>
+                    <span className="block text-[10px] uppercase font-bold text-slate-400">Agendados</span>
+                    <span className="text-xl font-black text-indigo-700">{item.agendamentos}</span>
                   </div>
                   <div className="text-right">
                     <span className="block text-[10px] uppercase font-bold text-slate-400">
-                      {item.isIA ? 'Orig. Vendas' : 'Vendas Fechadas'}
+                      Receita Originada (ROI)
                     </span>
                     <span className="text-sm font-black text-emerald-600">
-                      {item.isIA ? (item.vendasOriginadas || 0) : item.vendas} ({formatarMoeda(item.isIA ? (item.faturamentoOriginado || 0) : item.faturamento)})
+                      {item.vendasOriginadas} vendas ({formatarMoeda(item.faturamentoOriginado)})
                     </span>
                   </div>
                 </div>
@@ -646,25 +769,109 @@ export default function KanbanAnalytics({
       </div>
 
       {/* =========================================================================
-          SEÇÃO NOVO 3: MÉTRICAS INDIVIDUAIS DOS COLABORADORES E IA LARA (TABELA DETALHADA)
+          QUADRO 1 (PRÉ-VENDA / SDR): PERFORMANCE DE AGENDAMENTOS & ORIGINAÇÃO
           ========================================================================= */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
+      <div className="bg-white p-6 rounded-2xl border border-indigo-200/80 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div>
             <div className="flex items-center gap-2">
-              <span className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
+              <span className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg font-bold text-sm">
+                📅
               </span>
-              <h3 className="text-base font-extrabold text-slate-900">Produtividade Individual dos Colaboradores</h3>
+              <h3 className="text-base font-extrabold text-slate-900">
+                Quadro 1: Performance de Agendamentos & Captação (Pré-Venda / SDR)
+              </h3>
             </div>
             <p className="text-xs text-slate-500 font-medium mt-1">
-              Acompanhamento de conversão, consultas confirmadas e faturamento gerado por atendente (incluindo IA Lara)
+              Mede quem agendou o paciente e quanto faturamento esses agendamentos geraram para a clínica (Blindado por Voucher VIP)
             </p>
           </div>
-          {loadingProfiles && (
+          <span className="text-[11px] font-bold px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full">
+            🔒 Mérito de Agendamento Protegido
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-slate-200 text-[11px] font-black uppercase text-slate-400">
+                <th className="pb-3">Canal / Agendador (SDR)</th>
+                <th className="pb-3 text-center">Função</th>
+                <th className="pb-3 text-center">Unidade</th>
+                <th className="pb-3 text-center">Pacientes Agendados</th>
+                <th className="pb-3 text-center">Compareceram</th>
+                <th className="pb-3 text-center">Vendas Originadas</th>
+                <th className="pb-3 text-right">Faturamento Originado (ROI)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
+              {metricasAgendadores.map((m) => (
+                <tr 
+                  key={m.id} 
+                  className={`hover:bg-slate-50/80 transition-colors ${
+                    m.isIA ? 'bg-indigo-50/50 font-bold border-l-4 border-l-indigo-600' : ''
+                  }`}
+                >
+                  <td className="py-3.5 font-bold text-slate-900 flex items-center gap-2">
+                    {m.isIA ? (
+                      <span className="p-1 bg-indigo-600 text-white rounded text-xs">🤖</span>
+                    ) : (
+                      <span className="p-1 bg-slate-200 text-slate-700 rounded text-xs">👤</span>
+                    )}
+                    <div>
+                      <span className="truncate max-w-[210px] block" title={m.nome}>{m.nome}</span>
+                      {m.isIA && m.vouchersEmitidos > 0 && (
+                        <span className="text-[10px] text-indigo-600 font-bold">
+                          🎟️ {m.vouchersEmitidos} Vouchers VIP ativos
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="py-3.5 text-center">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                      m.isIA ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {m.cargo}
+                    </span>
+                  </td>
+                  <td className="py-3.5 text-center text-slate-500">{m.unidade}</td>
+                  <td className="py-3.5 text-center font-black text-indigo-700 text-sm">{m.agendamentos}</td>
+                  <td className="py-3.5 text-center font-bold text-amber-700">{m.comparecimentos}</td>
+                  <td className="py-3.5 text-center font-black text-teal-700">{m.vendasOriginadas}</td>
+                  <td className="py-3.5 text-right font-black text-emerald-700 text-sm">
+                    {formatarMoeda(m.faturamentoOriginado)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* =========================================================================
+          QUADRO 2 (FECHAMENTO NA CLÍNICA / CLOSERS): PRODUTIVIDADE COMERCIAL PRESENCIAL
+          ========================================================================= */}
+      <div className="bg-white p-6 rounded-2xl border border-emerald-200/80 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg font-bold text-sm">
+                💼
+              </span>
+              <h3 className="text-base font-extrabold text-slate-900">
+                Quadro 2: Fechamento Comercial na Clínica (Vendedores / Closers)
+              </h3>
+            </div>
+            <p className="text-xs text-slate-500 font-medium mt-1">
+              Mede quem atendeu presencialmente na clínica e fechou o contrato financeiro (sem alterar o mérito de quem agendou)
+            </p>
+          </div>
+          {loadingProfiles ? (
             <span className="text-xs font-semibold text-slate-400 animate-pulse">Atualizando equipe...</span>
+          ) : (
+            <span className="text-[11px] font-bold px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full">
+              💰 Conversão Presencial na Clínica
+            </span>
           )}
         </div>
 
@@ -672,56 +879,58 @@ export default function KanbanAnalytics({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-200 text-[11px] font-black uppercase text-slate-400">
-                <th className="pb-3">Membro / Atendente</th>
+                <th className="pb-3">Vendedor / Closer (Na Clínica)</th>
                 <th className="pb-3 text-center">Cargo / Função</th>
                 <th className="pb-3 text-center">Unidade</th>
-                <th className="pb-3 text-center">Agendados</th>
                 <th className="pb-3 text-center">Vendas Fechadas</th>
-                <th className="pb-3 text-right">Faturamento Gerado</th>
+                <th className="pb-3 text-center">Origem dos Pacientes</th>
+                <th className="pb-3 text-right">Ticket Médio</th>
+                <th className="pb-3 text-right">Faturamento Fechado</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
-              {metricasColaboradores.map((m) => (
-                <tr 
-                  key={m.id} 
-                  className={`hover:bg-slate-50/80 transition-colors ${
-                    m.isIA ? 'bg-indigo-50/40 font-bold border-l-4 border-l-indigo-600' : ''
-                  }`}
-                >
-                  <td className="py-3 font-bold text-slate-900 flex items-center gap-2">
-                    {m.isIA ? (
-                      <span className="p-1 bg-indigo-600 text-white rounded text-xs">🤖</span>
-                    ) : (
-                      <span className="p-1 bg-slate-200 text-slate-700 rounded text-xs">👤</span>
-                    )}
-                    <span className="truncate max-w-[200px]" title={m.nome}>{m.nome}</span>
+              {metricasClosers.map((c) => (
+                <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
+                  <td className="py-3.5 font-bold text-slate-900 flex items-center gap-2">
+                    <span className="p-1 bg-emerald-100 text-emerald-800 rounded text-xs">💼</span>
+                    <span className="truncate max-w-[200px]" title={c.nome}>{c.nome}</span>
                   </td>
-                  <td className="py-3 text-center">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                      m.isIA ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'
-                    }`}>
-                      {m.cargo}
+                  <td className="py-3.5 text-center">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-slate-100 text-slate-600">
+                      {c.cargo}
                     </span>
                   </td>
-                  <td className="py-3 text-center text-slate-500">{m.unidade}</td>
-                  <td className="py-3 text-center font-black text-indigo-600">{m.agendamentos}</td>
-                  <td className="py-3 text-center font-black text-teal-600">
-                    {m.isIA ? (
-                      <span title={`${m.vendasOriginadas || 0} vendas originadas via agendamento IA`}>
-                        {m.vendas} <span className="text-[10px] font-normal text-indigo-600">({m.vendasOriginadas || 0} orig.)</span>
-                      </span>
+                  <td className="py-3.5 text-center text-slate-500">{c.unidade}</td>
+                  <td className="py-3.5 text-center font-black text-teal-700 text-sm">{c.vendasFechadas}</td>
+                  <td className="py-3.5 text-center">
+                    {c.vendasFechadas === 0 ? (
+                      <span className="text-slate-300">—</span>
                     ) : (
-                      m.vendas
+                      <div className="inline-flex items-center gap-1.5 flex-wrap justify-center">
+                        {c.vendasDeLara > 0 && (
+                          <span
+                            className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold"
+                            title="Pacientes agendados originalmente pela IA Lara"
+                          >
+                            🤖 {c.vendasDeLara} da Lara
+                          </span>
+                        )}
+                        {c.vendasDeClinica > 0 && (
+                          <span
+                            className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold"
+                            title="Pacientes agendados pela própria Clínica/Recepção"
+                          >
+                            🏥 {c.vendasDeClinica} da Clínica
+                          </span>
+                        )}
+                      </div>
                     )}
                   </td>
-                  <td className="py-3 text-right font-black text-slate-900">
-                    {m.isIA ? (
-                      <span className="text-slate-400 font-semibold" title={`Faturamento originado pela IA: ${formatarMoeda(m.faturamentoOriginado)}`}>
-                        R$ 0,00 <span className="block text-[10px] text-indigo-600 font-bold">({formatarMoeda(m.faturamentoOriginado)} orig.)</span>
-                      </span>
-                    ) : (
-                      formatarMoeda(m.faturamento)
-                    )}
+                  <td className="py-3.5 text-right font-semibold text-slate-600">
+                    {formatarMoeda(c.ticketMedio)}
+                  </td>
+                  <td className="py-3.5 text-right font-black text-slate-900 text-sm">
+                    {formatarMoeda(c.faturamentoFechado)}
                   </td>
                 </tr>
               ))}
@@ -756,7 +965,6 @@ export default function KanbanAnalytics({
 
         <div className="space-y-4 pt-2">
           
-          {/* Etapa 1: Leads Recebidos */}
           <div>
             <div className="flex justify-between text-xs font-bold text-slate-700 mb-1.5">
               <span>1. Leads Recebidos</span>
@@ -767,7 +975,6 @@ export default function KanbanAnalytics({
             </div>
           </div>
 
-          {/* Etapa 2: Agendados */}
           <div>
             <div className="flex justify-between text-xs font-bold text-indigo-700 mb-1.5">
               <span>2. Agendados (Agenda da Clínica)</span>
@@ -778,7 +985,6 @@ export default function KanbanAnalytics({
             </div>
           </div>
 
-          {/* Etapa 3: Confirmados */}
           <div>
             <div className="flex justify-between text-xs font-bold text-emerald-700 mb-1.5">
               <span>3. Consultas Confirmadas</span>
@@ -789,7 +995,6 @@ export default function KanbanAnalytics({
             </div>
           </div>
 
-          {/* Etapa 4: Compareceram */}
           <div>
             <div className="flex justify-between text-xs font-bold text-amber-700 mb-1.5">
               <span>4. Compareceram à Clínica</span>
@@ -800,14 +1005,13 @@ export default function KanbanAnalytics({
             </div>
           </div>
 
-          {/* Etapa 5: Vendas Fechadas */}
           <div>
             <div className="flex justify-between text-xs font-bold text-teal-700 mb-1.5">
               <span>5. Tratamento Fechado (Venda)</span>
               <span>{funil.vendidos} ({funil.compareceram > 0 ? ((funil.vendidos / funil.compareceram) * 100).toFixed(1) : 0}% na clínica)</span>
             </div>
             <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
-              <div className="h-full bg-teal-500 rounded-full transition-all duration-500" style={{ width: `${funil.total > 0 ? (funil.vendidos / funil.compareceram) * 100 : 0}%` }}></div>
+              <div className="h-full bg-teal-500 rounded-full transition-all duration-500" style={{ width: `${funil.compareceram > 0 ? (funil.vendidos / funil.compareceram) * 100 : 0}%` }}></div>
             </div>
           </div>
 
@@ -817,7 +1021,6 @@ export default function KanbanAnalytics({
       {/* SEÇÃO 5: DEMANDA POR PROCEDIMENTO & PERFORMANCE POR UNIDADE */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
-        {/* DEMANDA POR PROCEDIMENTO */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
           <div className="border-b border-slate-100 pb-3">
             <h3 className="text-base font-extrabold text-slate-900">Demanda por Procedimento</h3>
@@ -843,7 +1046,6 @@ export default function KanbanAnalytics({
           </div>
         </div>
 
-        {/* COMPARATIVO POR UNIDADE */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
           <div className="border-b border-slate-100 pb-3">
             <h3 className="text-base font-extrabold text-slate-900">Performance por Unidade</h3>

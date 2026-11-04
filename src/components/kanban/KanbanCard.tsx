@@ -5,6 +5,7 @@
 import React from 'react';
 import { Draggable } from '@hello-pangea/dnd';
 import { parseDataSegura } from '../../utils/dateUtils';
+import { isLeadAgendadoPelaLara, obterVoucherDoLead } from '../../utils/kanbanUtils';
 
 const defaultGetHorasParado = (lead: any): number => {
   const timeMovimentacao = parseDataSegura(lead?.data_movimentacao);
@@ -92,7 +93,7 @@ export default function KanbanCard({
   formatarTempoParado = defaultFormatarTempoParado,
   getHorasParado = defaultGetHorasParado,
 }: KanbanCardProps) {
-  const statusAtual = colunaId || lead?.status || 'novo';
+  const statusAtual = (colunaId || lead?.status || 'novo').toLowerCase().trim();
   const horasParado = getHorasParado(lead);
   const isCritico = horasParado >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(statusAtual);
   const isAlerta = horasParado >= 12 && horasParado < 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(statusAtual);
@@ -100,12 +101,12 @@ export default function KanbanCard({
   const cargoNorm = (userProfile?.cargo || '').toLowerCase();
   const isManagerOrAdmin = cargoNorm.includes('admin') || cargoNorm.includes('gerente') || cargoNorm.includes('gestor');
   
-  // Verificação de posse do card
+  // Verificação de posse ativa no chat (somente quando a IA está pausada)
   const leadRespId = lead?.responsavel_id;
   const leadRespNome = lead?.responsavel_nome || lead?.pausado_por;
   const currentUserId = userProfile?.id;
-  const isOwner = currentUserId && leadRespId && String(currentUserId) === String(leadRespId);
-  const isLockedByOther = leadRespId && currentUserId && String(leadRespId) !== String(currentUserId) && !isManagerOrAdmin;
+  const isOwner = Boolean(lead?.is_paused) && currentUserId && leadRespId && String(currentUserId) === String(leadRespId);
+  const isLockedByOther = Boolean(lead?.is_paused) && leadRespId && currentUserId && String(leadRespId) !== String(currentUserId) && !isManagerOrAdmin;
 
   const handleCardClick = () => {
     if (onSelectLead) {
@@ -118,9 +119,15 @@ export default function KanbanCard({
   const dataAgendamentoTexto = formatarDataAgendamento(lead.data_agendamento);
   const valorVendaNum = Number(lead.valor_venda) || 0;
 
-  const isAgendamentoClinica = (lead.tipo_agendamento || '').toLowerCase() === 'clinica' || 
-                               statusAtual === 'agendado_clinica' ||
-                               (lead.status || '').toLowerCase() === 'agendado_clinica';
+  const agendadoPelaLara = isLeadAgendadoPelaLara(lead);
+  const isAgendamentoClinica = !agendadoPelaLara && (
+    (lead.tipo_agendamento || '').toLowerCase() === 'clinica' ||
+    statusAtual === 'agendado_clinica' ||
+    (lead.status || '').toLowerCase() === 'agendado_clinica'
+  );
+
+  const voucherCodigo = agendadoPelaLara ? obterVoucherDoLead(lead) : null;
+  const vendedorFechamento = lead?.vendedor_nome || (statusAtual === 'vendido' ? lead?.responsavel_nome : null);
 
   const cardContent = (
     <div
@@ -135,13 +142,13 @@ export default function KanbanCard({
           : 'border-slate-200 hover:border-blue-400'
       }`}
     >
-      {/* CABEÇALHO DO CARD: NOME DO PACIENTE E IDENTIFICAÇÃO DO USUÁRIO / IA */}
+      {/* CABEÇALHO DO CARD: NOME DO PACIENTE E IDENTIFICAÇÃO DO CANAL / AGENDADOR */}
       <div className="flex justify-between items-start mb-1 gap-2">
         <h4 className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors line-clamp-1 leading-snug">
           {lead.name || 'Sem Nome'}
         </h4>
 
-        {/* IDENTIFICAÇÃO DO ATENDENTE / IA COM TRAVA VISUAL */}
+        {/* IDENTIFICAÇÃO DO CANAL DE ATENDIMENTO / ORIGEM */}
         <div className="shrink-0 flex items-center gap-1">
           {lead.is_paused ? (
             leadRespNome ? (
@@ -153,7 +160,7 @@ export default function KanbanCard({
                     ? 'bg-blue-600 text-white font-extrabold'
                     : 'bg-slate-900 text-white'
                 }`}
-                title={isLockedByOther ? `Em atendimento por ${leadRespNome} (Travado)` : `Responsável: ${leadRespNome}`}
+                title={isLockedByOther ? `Chat assumido por ${leadRespNome} (Travado)` : `Chat assumido por: ${leadRespNome}`}
               >
                 <span>{isLockedByOther ? '🔒' : '👤'}</span>
                 <span className="truncate max-w-[85px]">{leadRespNome}</span>
@@ -163,10 +170,18 @@ export default function KanbanCard({
                 👤 Humano
               </span>
             )
+          ) : isAgendamentoClinica ? (
+            <span
+              className="text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1"
+              title={`Agendado pela Clínica (${lead.agendado_por || 'Recepção'})`}
+            >
+              <span>🏥</span>
+              <span className="truncate max-w-[85px]">{lead.agendado_por || 'Clínica'}</span>
+            </span>
           ) : (
             <span 
               className="text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/80 px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1"
-              title="Atendimento automático pela IA Lara"
+              title="Atendimento e Agendamento pela IA Lara"
             >
               <span>🤖</span>
               <span>Lara (IA)</span>
@@ -175,24 +190,36 @@ export default function KanbanCard({
         </div>
       </div>
 
-      {/* TELEFONE FORMATADO COM DDD (EX: (11) 99999-8888) */}
+      {/* TELEFONE FORMATADO COM DDD */}
       <p className="text-xs font-semibold text-slate-400 mb-2">
         {formatarTelefone(lead.phone || lead.phone_number)}
       </p>
 
-      {/* ÁREA DE INFORMAÇÕES DE DESTAQUE (VALORES / AGENDAMENTO / ORIGEM) */}
+      {/* ÁREA DE INFORMAÇÕES DE DESTAQUE (VALORES / VENDEDOR / AGENDAMENTO / VOUCHER) */}
       <div className="space-y-1.5 mb-2.5">
         
-        {/* VALOR DA VENDA: REITOR DO CARD (VERDE EMERALD EXCLUSIVO) */}
+        {/* VALOR DA VENDA + QUEM FECHOU NA CLÍNICA */}
         {valorVendaNum > 0 && (
-          <div className="flex items-center gap-1.5 w-fit">
-            <span className="inline-flex items-center gap-1 text-xs font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2.5 py-1 rounded-lg shadow-xs">
-              💰 {formatarMoeda(valorVendaNum)}
-            </span>
-            {lead.data_venda && (
-              <span className="text-[10px] font-semibold text-emerald-600 bg-white border border-emerald-100 px-2 py-0.5 rounded-md">
-                📅 {formatarDataCurta(lead.data_venda)}
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 w-fit">
+              <span className="inline-flex items-center gap-1 text-xs font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2.5 py-1 rounded-lg shadow-xs">
+                💰 {formatarMoeda(valorVendaNum)}
               </span>
+              {lead.data_venda && (
+                <span className="text-[10px] font-semibold text-emerald-600 bg-white border border-emerald-100 px-2 py-0.5 rounded-md">
+                  📅 {formatarDataCurta(lead.data_venda)}
+                </span>
+              )}
+            </div>
+
+            {vendedorFechamento && (
+              <div
+                className="inline-flex items-center gap-1 text-[10px] font-bold text-teal-800 bg-teal-50/90 border border-teal-200 px-2 py-0.5 rounded-md w-fit"
+                title={`Venda fechada presencialmente na clínica por ${vendedorFechamento}`}
+              >
+                <span>💼</span>
+                <span className="truncate max-w-[170px]">Fechado por: {vendedorFechamento}</span>
+              </div>
             )}
           </div>
         )}
@@ -218,7 +245,18 @@ export default function KanbanCard({
           )
         )}
 
-        {/* ORIGEM / PROMOTOR (EXIBIDO APENAS SE NÃO HOUVER VENDA/AGENDAMENTO PARA MANTER O CARD ENXUTO) */}
+        {/* SELO DO VOUCHER VIP DA LARA */}
+        {voucherCodigo && (
+          <div
+            className="inline-flex items-center gap-1 bg-indigo-50/60 border border-indigo-200/80 text-indigo-800 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold w-fit"
+            title="Voucher VIP inalterável gerado pela IA Lara"
+          >
+            <span>🎟️</span>
+            <span>{voucherCodigo}</span>
+          </div>
+        )}
+
+        {/* ORIGEM / PROMOTOR */}
         {lead.promotor && valorVendaNum === 0 && !dataAgendamentoTexto && (
           <span className="inline-block text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
             👤 {lead.promotor}

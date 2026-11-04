@@ -54,10 +54,8 @@ export const parseValorMonetario = (val?: number | string | null): number => {
 
   let cleaned = str.replace(/[^\d.,-]/g, '');
   if (cleaned.includes(',') && cleaned.includes('.')) {
-    // Padrão brasileiro com milhar: 1.500,50 -> 1500.50
     cleaned = cleaned.replace(/\./g, '').replace(',', '.');
   } else if (cleaned.includes(',')) {
-    // Padrão sem milhar: 1500,50 -> 1500.50
     cleaned = cleaned.replace(',', '.');
   }
 
@@ -131,7 +129,6 @@ export const getIsoDateBounds = (range: string, customStart?: string, customEnd?
 /**
  * Filtro determinístico de período:
  * - Para a coluna 'Tratamento Fechado' (status === 'vendido'), filtra ESTRITAMENTE pela data_venda
- *   (com fallback para data_movimentacao || created_at apenas se data_venda for nula no banco).
  * - Para as demais colunas, avalia created_at, data_agendamento, data_movimentacao e ultima_interacao.
  */
 export const isLeadWithinPeriod = (
@@ -147,7 +144,6 @@ export const isLeadWithinPeriod = (
   const bounds = getIsoDateBounds(r, customStart, customEnd);
   const statusNorm = (lead.status || 'novo').toLowerCase().trim();
 
-  // REGRA ESTRITA PARA TRATAMENTO FECHADO (status === 'vendido')
   if (statusNorm === 'vendido') {
     const msVenda = parseDataSegura(lead.data_venda);
     const targetMs = msVenda > 0
@@ -156,7 +152,6 @@ export const isLeadWithinPeriod = (
     return targetMs >= bounds.startMs && targetMs <= bounds.endMs;
   }
 
-  // DEMAIS COLUNAS DO PIPELINE
   const datas = [
     parseDataSegura(lead.created_at || lead.created),
     parseDataSegura(lead.data_agendamento),
@@ -203,4 +198,140 @@ export const fetchAllLeadsFromSupabase = async (supabaseClient: any): Promise<an
   }
 
   return allLeads;
+};
+
+/**
+ * Extrai código de Voucher VIP de uma mensagem de texto da IA Lara.
+ * Exemplo suportado: "🎟️ **Voucher VIP: DENTUP-SAN-1588**" -> "DENTUP-SAN-1588"
+ */
+export const extrairVoucherDeTexto = (texto?: string | null): string | null => {
+  if (!texto || typeof texto !== 'string') return null;
+
+  const matchDentup = texto.match(/\b(DENTUP-[A-Z0-9]{2,6}-\d{3,6})\b/i);
+  if (matchDentup && matchDentup[1]) {
+    return matchDentup[1].toUpperCase().trim();
+  }
+
+  const matchVoucher = texto.match(/Voucher\s*VIP\s*:\s*\*?\*?\s*([A-Z0-9-]{6,25})/i);
+  if (matchVoucher && matchVoucher[1]) {
+    return matchVoucher[1].toUpperCase().trim();
+  }
+
+  return null;
+};
+
+/**
+ * Retorna a sigla de 3 letras da unidade para compor o Voucher VIP.
+ */
+export const obterSiglaUnidade = (unidade?: string | null): string => {
+  const u = (unidade || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  if (u.includes('diadema')) return 'DIA';
+  if (u.includes('maua')) return 'MAU';
+  if (u.includes('mateus')) return 'SMA';
+  return 'SAN';
+};
+
+/**
+ * REGRA DEFINITIVA DE AUDITORIA:
+ * O agendamento pertence à IA Lara se e SOMENTE se:
+ * 1. Há um Voucher VIP real emitido no banco (capturado da mensagem da Lara no chat).
+ * 2. OU foi expressamente marcado como Lara sem intervenção humana no atendimento (não pausado e sem responsável humano anterior ao agendamento).
+ * 
+ * Se o chat foi assumido por uma atendente humana (ex: Gyovana Freire, Camila) antes de agendar,
+ * e a Lara NÃO emitiu voucher no chat, O AGENDAMENTO PERTENCE À ATENDENTE HUMANA / CLÍNICA!
+ */
+export const isLeadAgendadoPelaLara = (lead: any): boolean => {
+  if (!lead) return false;
+
+  // 1. Se tem Voucher VIP real gravado, foi 100% Lara no WhatsApp
+  if (lead.voucher && String(lead.voucher).trim() !== '') {
+    return true;
+  }
+
+  const tipoAgendamento = (lead.tipo_agendamento || '').toLowerCase().trim();
+  const agendadoPor = (lead.agendado_por || '').toLowerCase().trim();
+  const isPausadoHumano = Boolean(lead.is_paused);
+  const temAtendenteHumano = Boolean(lead.responsavel_id) || (lead.responsavel_nome && !lead.responsavel_nome.toLowerCase().includes('lara'));
+
+  // 2. Se foi assumido por atendente humano no chat e NÃO teve voucher emitido pela Lara, É DA CLÍNICA!
+  if (isPausadoHumano && temAtendenteHumano) {
+    return false;
+  }
+
+  // 3. Se foi explicitamente marcado como clínica ou tem nome de atendente humano em agendado_por
+  if (
+    tipoAgendamento === 'clinica' ||
+    agendadoPor.includes('clínica') ||
+    agendadoPor.includes('clinica') ||
+    agendadoPor.includes('recepção') ||
+    agendadoPor.includes('recepcao') ||
+    (agendadoPor !== '' && !agendadoPor.includes('lara'))
+  ) {
+    return false;
+  }
+
+  // 4. Se está marcado como tipo_agendamento === 'lara' ou agendado_por === 'Lara (IA)' sem atendente humano ter assumido
+  if ((tipoAgendamento === 'lara' || agendadoPor.includes('lara')) && !isPausadoHumano) {
+    return true;
+  }
+
+  return false;
+};
+
+/**
+ * Retorna o Voucher VIP do lead SOMENTE SE existir um voucher real no banco.
+ * NUNCA fabrica voucher fictício para não roubar agendamentos da recepção!
+ */
+export const obterVoucherDoLead = (lead: any): string | null => {
+  if (!lead) return null;
+
+  if (lead.voucher && String(lead.voucher).trim() !== '') {
+    return String(lead.voucher).trim().toUpperCase();
+  }
+
+  return null;
+};
+
+/**
+ * Atualiza um lead no Supabase com resiliência automática:
+ * Caso as colunas novas (voucher, vendedor_nome, vendedor_id) ainda não tenham sido criadas no banco via SQL,
+ * faz fallback automático removendo apenas as colunas ausentes para nunca falhar a operação.
+ */
+export const updateLeadResiliente = async (
+  supabaseClient: any,
+  leadId: string | number,
+  updates: Record<string, any>
+): Promise<{ error: any }> => {
+  const { error } = await supabaseClient
+    .from('dentup_leads')
+    .update(updates)
+    .eq('id', leadId);
+
+  if (error) {
+    const msg = (error.message || '').toLowerCase();
+    const colunasNovas = ['voucher', 'vendedor_nome', 'vendedor_id'];
+    const temErroColunaNova = colunasNovas.some((col) => msg.includes(col));
+
+    if (temErroColunaNova) {
+      const safeUpdates = { ...updates };
+      colunasNovas.forEach((col) => delete safeUpdates[col]);
+
+      if (updates.vendedor_nome && !safeUpdates.responsavel_nome) {
+        safeUpdates.responsavel_nome = updates.vendedor_nome;
+      }
+      if (updates.vendedor_id && !safeUpdates.responsavel_id) {
+        safeUpdates.responsavel_id = updates.vendedor_id;
+      }
+
+      if (Object.keys(safeUpdates).length > 0) {
+        const retry = await supabaseClient
+          .from('dentup_leads')
+          .update(safeUpdates)
+          .eq('id', leadId);
+        return { error: retry.error };
+      }
+    }
+  }
+
+  return { error };
 };
