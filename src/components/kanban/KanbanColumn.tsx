@@ -31,19 +31,20 @@ export default function KanbanColumn({
         <div
           {...provided.droppableProps}
           ref={provided.innerRef}
-          className={`flex-shrink-0 w-[340px] flex flex-col max-h-full rounded-2xl bg-slate-100/80 border border-slate-200/80 p-3.5 transition-colors ${
+          data-col-id={id}
+          className={`flex-shrink-0 w-[86vw] sm:w-[320px] md:w-[340px] snap-center md:snap-align-none flex flex-col max-h-full min-h-0 rounded-2xl bg-slate-100/80 border border-slate-200/80 p-3 md:p-3.5 transition-colors ${
             snapshot.isDraggingOver ? 'bg-slate-200/90 border-blue-400 shadow-inner' : ''
           }`}
         >
           {/* CABEÇALHO DA COLUNA (CLEAN E SEM DIVERGÊNCIA DE VALORES) */}
-          <div className="mb-3 px-1 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className={`w-3 h-3 rounded-full ${dotColor} shadow-sm`} />
-              <h3 className="font-extrabold text-slate-800 text-sm tracking-tight">{titulo}</h3>
+          <div className="mb-2.5 md:mb-3 px-1 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className={`w-3 h-3 rounded-full shrink-0 ${dotColor} shadow-sm`} />
+              <h3 className="font-extrabold text-slate-800 text-sm tracking-tight truncate">{titulo}</h3>
               
               {/* BADGE DE CADEADO AUDITADO NA COLUNA DE VENDA */}
               {isVendido && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-extrabold bg-emerald-100/80 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-200/60">
+                <span className="inline-flex items-center gap-1 text-[10px] font-extrabold bg-emerald-100/80 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-200/60 shrink-0">
                   <svg className="w-2.5 h-2.5 text-emerald-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                   </svg>
@@ -53,13 +54,13 @@ export default function KanbanColumn({
             </div>
 
             {/* CONTADOR DE CARDS */}
-            <span className="text-slate-700 text-xs font-black bg-slate-200/80 px-2.5 py-0.5 rounded-full">
+            <span className="text-slate-700 text-xs font-black bg-slate-200/80 px-2.5 py-0.5 rounded-full shrink-0">
               {leads.length}
             </span>
           </div>
 
           {/* LISTA DE CARDS COM SCROLL */}
-          <div className="flex-1 overflow-y-auto space-y-3 p-1 custom-scrollbar min-h-[160px]">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-scroll space-y-3 p-1 custom-scrollbar min-h-[160px]">
             {leads.length === 0 ? (
               <div className="h-24 flex items-center justify-center border-2 border-dashed border-slate-200/80 rounded-xl">
                 <span className="text-xs text-slate-400 font-medium">Nenhum paciente</span>

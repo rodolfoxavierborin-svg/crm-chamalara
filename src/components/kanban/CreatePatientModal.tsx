@@ -196,11 +196,11 @@ export default function CreatePatientModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[92dvh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
         
         {/* CABEÇALHO DO MODAL */}
-        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+        <div className="px-5 sm:px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
           <div>
             <h3 className="font-bold text-slate-800 text-base">Cadastrar Novo Paciente</h3>
             <p className="text-xs text-slate-500">Adicione um novo lead manualmente no CRM</p>
@@ -208,14 +208,15 @@ export default function CreatePatientModal({
           <button 
             type="button" 
             onClick={onClose} 
-            className="text-slate-400 hover:text-slate-700 text-lg font-light cursor-pointer"
+            aria-label="Fechar modal"
+            className="w-9 h-9 -mr-1.5 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 active:bg-slate-200 text-lg font-light cursor-pointer"
           >
             ✕
           </button>
         </div>
 
         {/* FORMULÁRIO */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+        <form onSubmit={handleSubmit} className="p-5 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-4 flex-1 min-h-0 overflow-y-auto overscroll-contain touch-scroll custom-scrollbar">
           
           {/* IDENTIFICAÇÃO DO USUÁRIO LOGADO / RESPONSÁVEL */}
           <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-3 flex items-center justify-between">
@@ -261,7 +262,7 @@ export default function CreatePatientModal({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Unidade</label>
               <select 
@@ -316,7 +317,7 @@ export default function CreatePatientModal({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Valor Venda (R$)</label>
               <input 

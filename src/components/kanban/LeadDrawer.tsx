@@ -5,10 +5,12 @@
 import React, { useState } from 'react';
 import { toDateStrSP } from '../../utils/dateUtils';
 import {
+  COLUNAS,
   parseValorMonetario,
   isLeadAgendadoPelaLara,
   obterVoucherDoLead
 } from '../../utils/kanbanUtils';
+import { buildWhatsAppLink, buildDentupGreeting } from '../../utils/formatters';
 
 const LISTA_UNIDADES = ['Santo André', 'Diadema', 'Mauá', 'São Mateus'];
 
@@ -93,6 +95,7 @@ interface LeadDrawerProps {
   profiles?: any[];
   onClose: () => void;
   onUpdateLead: (campo: string | Record<string, any>, valor?: any) => void;
+  onMoveStage?: (lead: any, novoStatus: string) => void;
   onSelectLead?: (lead: any) => void;
   userProfile?: any;
 }
@@ -102,12 +105,14 @@ export default function LeadDrawer({
   profiles = [],
   onClose,
   onUpdateLead,
+  onMoveStage,
   onSelectLead,
   userProfile,
 }: LeadDrawerProps) {
   const [showPauseModal, setShowPauseModal] = useState(false);
   const [motivoPausa, setMotivoPausa] = useState(MOTIVOS_PAUSA_PADRAO[0]);
   const [motivoPausaOutro, setMotivoPausaOutro] = useState('');
+  const [copiadoPhone, setCopiadoPhone] = useState(false);
 
   if (!lead) return null;
 
@@ -184,27 +189,39 @@ export default function LeadDrawer({
   // Identifica o vendedor selecionado para o select comercial
   const vendedorAtualNome = lead.vendedor_nome || (lead.status === 'vendido' ? lead.responsavel_nome : '') || '';
 
+  // Identifica a etapa visual exata do lead no funil
+  const statusNormLead = (lead.status || 'novo').toLowerCase().trim();
+  const etapaAtualFunil =
+    statusNormLead === 'agendado' || statusNormLead === 'agendado_clinica'
+      ? agendadoPorLara
+        ? 'agendado'
+        : 'agendado_clinica'
+      : statusNormLead === 'encerrados'
+      ? 'encerrado'
+      : statusNormLead;
+
   return (
     <>
       {/* MÁSCARA ESCURA DE FUNDO */}
       <div 
-        className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm z-20" 
+        className="fixed md:absolute inset-0 bg-slate-900/30 backdrop-blur-sm z-40 md:z-20" 
         onClick={onClose} 
       />
 
-      {/* DRAWER LATERAL */}
-      <div className="w-[470px] bg-white shadow-2xl flex flex-col z-30 absolute right-0 top-0 bottom-0 animate-in slide-in-from-right-8 duration-300">
+      {/* DRAWER LATERAL (TELA CHEIA NO MOBILE, LATERAL NO DESKTOP) */}
+      <div className="fixed md:absolute inset-y-0 right-0 w-full md:w-[470px] bg-white shadow-2xl flex flex-col z-50 md:z-30 animate-in slide-in-from-right-8 duration-300">
         
         {/* CABEÇALHO */}
-        <div className="px-8 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+        <div className="px-4 sm:px-8 py-4 sm:py-5 pt-[max(1rem,env(safe-area-inset-top))] border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
           <div>
-            <h3 className="font-bold text-slate-800 text-lg">Ficha do Paciente</h3>
+            <h3 className="font-bold text-slate-800 text-base sm:text-lg">Ficha do Paciente</h3>
             <p className="text-xs text-slate-500 mt-0.5">Gestão de Informações, Agendamento & Venda</p>
           </div>
           <button 
             type="button"
-            onClick={onClose} 
-            className="text-slate-400 hover:text-slate-700 text-xl font-light cursor-pointer"
+            onClick={onClose}
+            aria-label="Fechar ficha"
+            className="w-10 h-10 -mr-2 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 active:bg-slate-200 text-xl font-light cursor-pointer"
           >
             ✕
           </button>
@@ -212,7 +229,7 @@ export default function LeadDrawer({
 
         {/* ALERTA DE TRAVA DE SEGURANÇA (SE PERTENCER A OUTRO ATENDENTE NO CHAT) */}
         {isLockedByOther && (
-          <div className="bg-amber-50 border-b border-amber-200 px-8 py-3 flex items-center justify-between gap-2 text-xs text-amber-800 font-semibold">
+          <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-8 py-3 flex items-center justify-between gap-2 text-xs text-amber-800 font-semibold shrink-0">
             <div className="flex items-center gap-2">
               <span className="text-base">🔒</span>
               <span>Chat assumido por <strong>{lead.responsavel_nome || 'outro colega'}</strong>. Modo somente leitura ativado.</span>
@@ -222,7 +239,7 @@ export default function LeadDrawer({
 
         {/* BARRA DE GESTÃO DO ADMINISTRADOR (RESETAR / LIBERAR CARD) */}
         {isManagerOrAdmin && (lead.responsavel_nome || lead.responsavel_id) && (
-          <div className="bg-blue-50/80 border-b border-blue-200 px-8 py-2.5 flex items-center justify-between text-xs text-blue-900 font-semibold">
+          <div className="bg-blue-50/80 border-b border-blue-200 px-4 sm:px-8 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-blue-900 font-semibold shrink-0">
             <div className="flex items-center gap-1.5">
               <span>🛡️</span>
               <span>Vinculado a: <strong>{lead.responsavel_nome || 'Colaborador'}</strong></span>
@@ -239,8 +256,39 @@ export default function LeadDrawer({
         )}
         
         {/* CONTEÚDO DO FORMULÁRIO */}
-        <div className="p-8 flex-1 overflow-y-auto space-y-6 custom-scrollbar">
+        <div className="p-4 sm:p-8 flex-1 min-h-0 overflow-y-auto overscroll-contain touch-scroll space-y-5 sm:space-y-6 custom-scrollbar">
           
+          {/* MOVER ETAPA DO FUNIL (ESSENCIAL NO MOBILE E PRÁTICO NO DESKTOP) */}
+          {onMoveStage && (
+            <div className="bg-blue-50/60 p-3.5 rounded-xl border border-blue-200/80">
+              <label className="text-[11px] font-extrabold text-blue-900 uppercase tracking-wide block mb-1.5">
+                📌 Etapa no Funil (Mover Card)
+              </label>
+              <select
+                disabled={isLockedByOther || (etapaAtualFunil === 'vendido' && !isManagerOrAdmin)}
+                value={etapaAtualFunil}
+                onChange={(e) => onMoveStage(lead, e.target.value)}
+                className="w-full bg-white border border-blue-300 rounded-lg p-2.5 text-sm font-bold text-slate-800 outline-none focus:border-blue-500 shadow-sm cursor-pointer disabled:bg-slate-100 disabled:cursor-not-allowed"
+              >
+                {COLUNAS.map((col) => {
+                  const disableLaraTarget = col.id === 'agendado' && !agendadoPorLara;
+                  const disableClinicaTarget = col.id === 'agendado_clinica' && agendadoPorLara && Boolean(lead.voucher);
+                  return (
+                    <option
+                      key={col.id}
+                      value={col.id}
+                      disabled={disableLaraTarget || disableClinicaTarget}
+                    >
+                      {col.titulo}
+                      {disableLaraTarget ? ' (Exclusivo Voucher Lara)' : ''}
+                      {disableClinicaTarget ? ' (Bloqueado: Voucher Lara)' : ''}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
+
           {/* STATUS ATUAL DO ATENDIMENTO NO WHATSAPP */}
           <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 flex flex-col gap-2">
             <div className="flex justify-between items-center">
@@ -285,19 +333,58 @@ export default function LeadDrawer({
             />
           </div>
           
-          {/* WHATSAPP */}
+          {/* WHATSAPP COM ATALHO DIRETO PARA O CELULAR DA RECEPCIONISTA */}
           <div>
             <label className="text-xs font-bold text-slate-700 uppercase block mb-1">WhatsApp</label>
-            <input 
-              type="text" 
-              readOnly 
-              value={formatarTelefone(lead.phone || lead.phone_number)} 
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm text-slate-500 outline-none cursor-not-allowed" 
-            />
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input 
+                type="text" 
+                readOnly 
+                value={formatarTelefone(lead.phone || lead.phone_number)} 
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm text-slate-600 font-semibold outline-none cursor-not-allowed" 
+              />
+              <div className="flex gap-2 shrink-0">
+                {(() => {
+                  const waLink = buildWhatsAppLink(
+                    lead.phone || lead.phone_number,
+                    buildDentupGreeting(lead.name)
+                  );
+                  if (!waLink) return null;
+                  return (
+                    <a
+                      href={waLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold shadow-sm transition-all"
+                    >
+                      <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12.031 2c-5.516 0-9.969 4.453-9.969 9.969 0 1.766.469 3.484 1.344 5l-1.406 5.156 5.281-1.375c1.469.797 3.109 1.219 4.75 1.219 5.516 0 9.969-4.453 9.969-9.969S17.547 2 12.031 2zm5.813 14.125c-.25.703-1.438 1.344-2 1.422-.531.078-1.203.109-1.938-.125-.453-.141-1.031-.328-1.766-.641-3.109-1.344-5.141-4.484-5.297-4.688-.156-.203-1.266-1.688-1.266-3.219s.797-2.281 1.078-2.594c.281-.313.609-.391.813-.391.203 0 .406 0 .578.016.188.016.438-.078.688.516.25.609.859 2.094.938 2.25.078.156.125.344.031.547-.094.203-.141.328-.297.5-.156.172-.328.391-.469.531-.156.156-.313.328-.141.641.172.313.781 1.297 1.672 2.094 1.156 1.031 2.125 1.359 2.438 1.516.313.156.484.125.672-.078.188-.203.766-.891.969-1.203.203-.313.406-.266.688-.156.281.109 1.797.844 2.109 1 .313.156.516.234.594.359.078.125.078.734-.172 1.438z" />
+                      </svg>
+                      <span>Abrir WhatsApp</span>
+                    </a>
+                  );
+                })()}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const num = lead.phone || lead.phone_number || '';
+                    if (num && navigator?.clipboard) {
+                      navigator.clipboard.writeText(num);
+                      setCopiadoPhone(true);
+                      setTimeout(() => setCopiadoPhone(false), 1800);
+                    }
+                  }}
+                  className="px-3 py-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-bold transition-colors cursor-pointer"
+                  title="Copiar número"
+                >
+                  {copiadoPhone ? '✓ Copiado' : 'Copiar'}
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* UNIDADE E PROCEDIMENTO */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Unidade</label>
               <select 
@@ -561,8 +648,8 @@ export default function LeadDrawer({
         </div>
 
         {/* RODAPÉ DO DRAWER COM AÇÕES */}
-        <div className="p-6 border-t border-slate-100 bg-white">
-          <div className="grid grid-cols-2 gap-4">
+        <div className="p-4 sm:p-6 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-slate-100 bg-white shrink-0">
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
             
             {/* BOTÃO EXCLUSIVO DE PAUSAR / RETOMAR IA */}
             <button 
@@ -604,22 +691,23 @@ export default function LeadDrawer({
 
       {/* MODAL DE CONFIRMAÇÃO & JUSTIFICATIVA OBRIGATÓRIA (TRAVA ANTI-FURTO) */}
       {showPauseModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-60 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="bg-slate-900 px-6 py-4 text-white flex justify-between items-center">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-60 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md max-h-[92dvh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-slate-900 px-5 sm:px-6 py-4 text-white flex justify-between items-center shrink-0">
               <div className="flex items-center gap-2">
                 <span className="text-lg">🤖</span>
                 <h3 className="text-sm font-bold">Interromper IA Lara no Chat?</h3>
               </div>
               <button 
+                type="button"
                 onClick={() => setShowPauseModal(false)}
-                className="text-slate-400 hover:text-white font-bold cursor-pointer"
+                className="text-slate-400 hover:text-white font-bold p-1 cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-5 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-4 overflow-y-auto touch-scroll">
               <p className="text-xs text-slate-600 leading-relaxed">
                 A <strong>Lara (IA)</strong> está conduzindo este paciente no WhatsApp. Ao assumir o chat, você ficará responsável pelas mensagens, mas <strong>o mérito de agendamento da Lara permanece protegido</strong>:
               </p>

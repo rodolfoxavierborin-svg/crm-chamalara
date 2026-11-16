@@ -1,7 +1,7 @@
 // File: src/components/KanbanBoard.tsx
 "use client";
 
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { DragDropContext } from '@hello-pangea/dnd';
 import {
@@ -48,6 +48,8 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
   const [unidadeFilter, setUnidadeFilter] = useState('all');
   const [activeTab, setActiveTab] = useState<'kanban' | 'analytics' | 'calendar'>('kanban');
   const [isNewPatientModalOpen, setIsNewPatientModalOpen] = useState(false);
+  const [activeMobileCol, setActiveMobileCol] = useState<string>(COLUNAS[0]?.id || 'novo');
+  const kanbanScrollRef = useRef<HTMLDivElement>(null);
 
   // 🛡️ CONTROLE DE PERMISSÕES POR CARGO (EXATO PELAS OPÇÕES DO SISTEMA)
   const cargoNormalized = userProfile?.cargo?.toLowerCase().trim() || '';
@@ -106,17 +108,20 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     return () => { supabase.removeChannel(channel); };
   }, [fetchLeads]);
 
-  // 🛡️ ARRASTO COM BLOQUEIO DE SEGURANÇA, IMUTABILIDADE DO VOUCHER LARA E MODAL DE VENDA
-  const handleDragEnd = async (result: any) => {
-    const { destination, source, draggableId } = result;
-    if (!destination || (destination.droppableId === source.droppableId && destination.index === source.index)) return;
-
-    const leadEncontrado = (leads || []).find((l) => String(l.id) === String(draggableId));
+  // 🛡️ MOVIMENTAÇÃO UNIFICADA DE ETAPA (DRAG-AND-DROP + SELETOR MOBILE/DRAWER) COM TODAS AS TRAVAS DE SEGURANÇA
+  const moverLeadParaEtapa = async (
+    leadId: string | number,
+    statusOrigemRaw: string,
+    statusDestinoRaw: string
+  ) => {
+    const leadEncontrado = (leads || []).find((l) => String(l.id) === String(leadId));
     if (!leadEncontrado) return;
 
-    const statusOrigem = (source.droppableId || '').toLowerCase().trim();
-    const statusDestino = (destination.droppableId || '').toLowerCase().trim();
+    const statusOrigem = (statusOrigemRaw || '').toLowerCase().trim();
+    const statusDestino = (statusDestinoRaw || '').toLowerCase().trim();
     const statusAtualLead = (leadEncontrado.status || '').toLowerCase().trim();
+
+    if (!statusDestino || statusDestino === statusOrigem) return;
 
     // TRAVA 1: SEGURANÇA NA VENDA (Apenas Admin/Gerente pode tirar de 'vendido')
     if ((statusOrigem === 'vendido' || statusAtualLead === 'vendido') && !isManagerOrAdmin) {
@@ -168,13 +173,19 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
     }
 
     // Atualização Otimista no Estado Local
-    setLeads((prev = []) => prev.map((l) => (String(l.id) === String(draggableId) ? { ...l, ...updates } : l)));
-    if (leadDrawer && String(leadDrawer.id) === String(draggableId)) {
+    setLeads((prev = []) => prev.map((l) => (String(l.id) === String(leadId) ? { ...l, ...updates } : l)));
+    if (leadDrawer && String(leadDrawer.id) === String(leadId)) {
       setLeadDrawer((prev: any) => (prev ? { ...prev, ...updates } : null));
     }
 
     // Persistência Resiliente no Supabase
-    await updateLeadResiliente(supabase, draggableId, updates);
+    await updateLeadResiliente(supabase, leadId, updates);
+  };
+
+  const handleDragEnd = async (result: any) => {
+    const { destination, source, draggableId } = result;
+    if (!destination || (destination.droppableId === source.droppableId && destination.index === source.index)) return;
+    await moverLeadParaEtapa(draggableId, source.droppableId, destination.droppableId);
   };
 
   // Confirmação do Modal de Fechamento de Venda (Separação estrita entre Agendador e Vendedor)
@@ -337,11 +348,64 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
 
   const totalEstagnados = useMemo(() => leadsNaUnidadeGlobal.filter(l => getHorasParado(l) >= 24 && !['vendido', 'nao_vendido', 'encerrado'].includes(l.status)).length, [leadsNaUnidadeGlobal]);
 
+  const colunasComLeads = useMemo(() => {
+    return COLUNAS.map((coluna) => {
+      const colId = coluna.id.toLowerCase().trim();
+      const colLeads = leadsFiltrados
+        .filter((l) => {
+          const st = (l.status || 'novo').toLowerCase().trim();
+          if (colId === 'encerrado' || colId === 'encerrados') {
+            return st === 'encerrado' || st === 'encerrados';
+          }
+          // DIVISÃO AUDITADA: SE TEM VOUCHER REAL DA LARA -> COLUNA LARA. SE NÃO -> COLUNA CLÍNICA!
+          if (colId === 'agendado') {
+            return isLeadAgendadoPelaLara(l) && (st === 'agendado' || st === 'agendado_clinica');
+          }
+          if (colId === 'agendado_clinica') {
+            return !isLeadAgendadoPelaLara(l) && (st === 'agendado' || st === 'agendado_clinica');
+          }
+          return st === colId;
+        })
+        .sort((a, b) => getTempoCronologicoKanban(b) - getTempoCronologicoKanban(a));
+
+      return { ...coluna, leads: colLeads };
+    });
+  }, [leadsFiltrados]);
+
+  const scrollToColumn = (colId: string) => {
+    setActiveMobileCol(colId);
+    const el = kanbanScrollRef.current?.querySelector(`[data-col-id="${colId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  };
+
+  const handleKanbanScroll = () => {
+    const container = kanbanScrollRef.current;
+    if (!container || typeof window === 'undefined' || window.innerWidth >= 768) return;
+    const containerCenter = container.scrollLeft + container.clientWidth / 2;
+    let closestId = activeMobileCol;
+    let minDist = Infinity;
+    const children = container.querySelectorAll<HTMLElement>('[data-col-id]');
+    children.forEach((child) => {
+      const colCenter = child.offsetLeft + child.offsetWidth / 2;
+      const dist = Math.abs(colCenter - containerCenter);
+      if (dist < minDist) {
+        minDist = dist;
+        const id = child.getAttribute('data-col-id');
+        if (id) closestId = id;
+      }
+    });
+    if (closestId !== activeMobileCol) {
+      setActiveMobileCol(closestId);
+    }
+  };
+
   if (!isBrowser) return null;
 
   return (
-    <div className="flex flex-col h-full bg-[#F8FAFC] text-slate-800 font-sans">
-      <div className="bg-white border-b border-slate-200/80 z-10 sticky top-0 shadow-sm">
+    <div className="flex flex-col h-full min-h-0 bg-[#F8FAFC] text-slate-800 font-sans">
+      <div className="bg-white border-b border-slate-200/80 z-10 sticky top-0 shadow-sm shrink-0">
         <KanbanFilters
           activeTab={activeTab} setActiveTab={setActiveTab} isAdmin={isAdmin} userUnidade={userUnidade}
           targetUnidade={targetUnidade} setUnidadeFilter={setUnidadeFilter} dateRange={dateRange} setDateRange={setDateRange}
@@ -356,30 +420,55 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           totalEstagnados={totalEstagnados}
           formatarMoeda={formatarMoeda}
         />
+
+        {/* SELETOR RÁPIDO DE ETAPAS NO MOBILE (1 TOQUE PARA IR À COLUNA) */}
+        {activeTab === 'kanban' && (
+          <div className="md:hidden flex items-center gap-1.5 px-3 py-2 bg-white border-t border-slate-100 overflow-x-auto no-scrollbar touch-scroll">
+            {colunasComLeads.map((col) => {
+              const isSelected = activeMobileCol === col.id;
+              return (
+                <button
+                  key={col.id}
+                  type="button"
+                  onClick={() => scrollToColumn(col.id)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap shrink-0 border transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 active:bg-slate-100'
+                  }`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${col.dot}`} />
+                  <span>{col.titulo}</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-200/80 text-slate-700'
+                    }`}
+                  >
+                    {col.leads.length}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 min-h-0 overflow-hidden relative">
         {activeTab === 'kanban' && (
-          <div className="flex-1 overflow-x-auto p-6 custom-scrollbar">
+          <div
+            ref={kanbanScrollRef}
+            onScroll={handleKanbanScroll}
+            className="flex-1 min-h-0 overflow-x-auto snap-x snap-mandatory md:snap-none px-3 py-3 md:p-6 touch-scroll custom-scrollbar"
+          >
             <DragDropContext onDragEnd={handleDragEnd}>
-              <div className="flex gap-6 h-full items-start">
-                {COLUNAS.map((coluna) => (
+              <div className="flex gap-3 md:gap-6 h-full items-start">
+                {colunasComLeads.map((coluna) => (
                   <KanbanColumn
-                    key={coluna.id} id={coluna.id} titulo={coluna.titulo} dotColor={coluna.dot}
-                    leads={leadsFiltrados.filter((l) => {
-                      const st = (l.status || 'novo').toLowerCase().trim();
-                      const colId = coluna.id.toLowerCase().trim();
-                      if (colId === 'encerrado' || colId === 'encerrados') return st === 'encerrado' || st === 'encerrados';
-                      
-                      // DIVISÃO AUDITADA: SE TEM VOUCHER REAL DA LARA -> COLUNA LARA. SE NÃO -> COLUNA CLÍNICA!
-                      if (colId === 'agendado') {
-                        return isLeadAgendadoPelaLara(l) && (st === 'agendado' || st === 'agendado_clinica');
-                      }
-                      if (colId === 'agendado_clinica') {
-                        return !isLeadAgendadoPelaLara(l) && (st === 'agendado' || st === 'agendado_clinica');
-                      }
-                      return st === colId;
-                    }).sort((a, b) => getTempoCronologicoKanban(b) - getTempoCronologicoKanban(a))}
+                    key={coluna.id}
+                    id={coluna.id}
+                    titulo={coluna.titulo}
+                    dotColor={coluna.dot}
+                    leads={coluna.leads}
                     onSelectLead={(lead) => setLeadDrawer(lead)}
                     userProfile={userProfile}
                   />
@@ -404,6 +493,9 @@ export default function KanbanBoard({ onSelectLead, userProfile }: { onSelectLea
           profiles={profiles}
           onClose={() => setLeadDrawer(null)} 
           onUpdateLead={handleUpdateLead} 
+          onMoveStage={(leadObj, novoStatus) =>
+            moverLeadParaEtapa(leadObj.id, leadObj.status || 'novo', novoStatus)
+          }
           onSelectLead={onSelectLead} 
           userProfile={userProfile}
         />

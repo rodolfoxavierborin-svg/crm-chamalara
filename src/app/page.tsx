@@ -135,10 +135,13 @@ export default function HomePage() {
     };
   }, [loadingAuth]);
 
-  // SELEÇÃO AUTOMÁTICA DO PRIMEIRO LEAD COM MENSAGEM REAL AO CARREGAR
+  // SELEÇÃO AUTOMÁTICA DO PRIMEIRO LEAD COM MENSAGEM REAL AO CARREGAR (APENAS DESKTOP)
   useEffect(() => {
     if (leads.length > 0 && Object.keys(lastMessageMap).length > 0) {
       if (!selectedLead) {
+        const isDesktop = typeof window !== 'undefined' && window.innerWidth >= 768;
+        if (!isDesktop) return;
+
         const activeLeads = leads
           .filter((lead) => {
             const cleanPhone = (lead.phone || lead.phone_number || '').replace(/\D/g, '');
@@ -328,7 +331,7 @@ export default function HomePage() {
 
   if (loadingAuth) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-dvh bg-slate-50 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
           <p className="text-sm font-semibold text-slate-500">Carregando ambiente seguro...</p>
@@ -363,9 +366,11 @@ export default function HomePage() {
       return parseDataSegura(b.ultima_interacao_real) - parseDataSegura(a.ultima_interacao_real);
     });
 
+  const isMobileChatOpen = abaAtiva === 'chat' && Boolean(selectedLead);
+
   return (
-    <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans notranslate" translate="no">
-      {/* HEADER COMPONENTIZADO */}
+    <div className="flex flex-col h-dvh bg-slate-50 text-slate-800 font-sans notranslate overflow-hidden" translate="no">
+      {/* HEADER COMPONENTIZADO (oculto no mobile quando dentro de uma conversa ativa para tela cheia) */}
       <Header
         userProfile={userProfile}
         abaAtiva={abaAtiva}
@@ -374,10 +379,11 @@ export default function HomePage() {
         userUnidade={userUnidade}
         onOpenTeamModal={() => setShowTeamModal(true)}
         onLogout={handleLogout}
+        hideOnMobile={isMobileChatOpen}
       />
 
       {/* CORPO PRINCIPAL */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden">
         {abaAtiva === 'kanban' ? (
           <KanbanBoard
             userProfile={userProfile}
@@ -387,7 +393,7 @@ export default function HomePage() {
             }}
           />
         ) : (
-          <div className="flex h-full w-full bg-white border-x border-slate-200">
+          <div className="flex h-full min-h-0 w-full bg-white md:border-x border-slate-200">
             {/* SIDEBAR DE CONVERSAS COMPONENTIZADA */}
             <ChatSidebar
               sortedLeads={sortedLeadsWithChat}
@@ -415,6 +421,63 @@ export default function HomePage() {
           </div>
         )}
       </div>
+
+      {/* BARRA DE NAVEGAÇÃO INFERIOR MOBILE (iOS & Android) */}
+      {!isMobileChatOpen && (
+        <nav
+          aria-label="Navegação principal"
+          className="md:hidden shrink-0 bg-white border-t border-slate-200 px-2 pt-1.5 pb-[max(0.45rem,env(safe-area-inset-bottom))] flex items-center justify-around z-20 shadow-[0_-4px_16px_rgba(15,23,42,0.06)]"
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setAbaAtiva('chat');
+              setSelectedLead(null);
+            }}
+            className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors relative cursor-pointer ${
+              abaAtiva === 'chat' ? 'text-blue-600' : 'text-slate-500 active:bg-slate-100'
+            }`}
+          >
+            <div className="relative">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={abaAtiva === 'chat' ? 2.4 : 1.9}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              {sortedLeadsWithChat.length > 0 && (
+                <span className="absolute -top-1.5 -right-2.5 bg-blue-600 text-white text-[9px] font-extrabold px-1.5 py-0.2 rounded-full leading-tight">
+                  {sortedLeadsWithChat.length > 99 ? '99+' : sortedLeadsWithChat.length}
+                </span>
+              )}
+            </div>
+            <span className="text-[11px] font-bold mt-0.5 notranslate">Conversas</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAbaAtiva('kanban')}
+            className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
+              abaAtiva === 'kanban' ? 'text-blue-600' : 'text-slate-500 active:bg-slate-100'
+            }`}
+          >
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={abaAtiva === 'kanban' ? 2.4 : 1.9}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+            </svg>
+            <span className="text-[11px] font-bold mt-0.5 notranslate">Quadro CRM</span>
+          </button>
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setShowTeamModal(true)}
+              className="flex-1 flex flex-col items-center justify-center py-1 rounded-xl text-slate-500 active:bg-slate-100 transition-colors cursor-pointer"
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.9}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+              <span className="text-[11px] font-bold mt-0.5 notranslate">Equipe</span>
+            </button>
+          )}
+        </nav>
+      )}
 
       {/* MODAL ISOLADO DE GERENCIAMENTO DE EQUIPE */}
       <TeamModal isOpen={showTeamModal} onClose={() => setShowTeamModal(false)} />

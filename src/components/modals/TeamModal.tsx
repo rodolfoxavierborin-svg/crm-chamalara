@@ -184,25 +184,32 @@ export default function TeamModal({ isOpen, onClose }: TeamModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden flex flex-col max-h-[92dvh] animate-in zoom-in-95 duration-200">
         
         {/* CABEÇALHO */}
-        <div className="bg-blue-600 px-6 py-4 text-white flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="bg-blue-600 px-5 sm:px-6 py-4 text-white flex justify-between items-center shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <svg className="w-6 h-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
             </svg>
-            <div>
-              <h2 className="text-lg font-bold">Gerenciar Equipe Dent'up</h2>
-              <p className="text-xs text-blue-100 font-medium">Cadastre, edite permissões e gerencie os acessos do CRM</p>
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-bold truncate">Gerenciar Equipe Dent'up</h2>
+              <p className="text-[11px] sm:text-xs text-blue-100 font-medium truncate">Cadastre, edite permissões e gerencie os acessos</p>
             </div>
           </div>
-          <button onClick={onClose} className="text-blue-100 hover:text-white text-xl font-bold cursor-pointer">✕</button>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fechar modal"
+            className="w-9 h-9 flex items-center justify-center rounded-full text-blue-100 hover:text-white active:bg-white/10 text-xl font-bold cursor-pointer shrink-0"
+          >
+            ✕
+          </button>
         </div>
 
         {/* CORPO DO MODAL */}
-        <div className="p-6 overflow-y-auto space-y-6 custom-scrollbar flex-1">
+        <div className="p-4 sm:p-6 overflow-y-auto overscroll-contain touch-scroll space-y-5 sm:space-y-6 custom-scrollbar flex-1 min-h-0">
           
           {/* MENSAGENS GERAIS */}
           {teamError && <div className="bg-red-50 text-red-700 text-xs p-3 rounded-lg border border-red-200 font-medium">{teamError}</div>}
@@ -283,8 +290,8 @@ export default function TeamModal({ isOpen, onClose }: TeamModalProps) {
               </div>
             </div>
 
-            <div className="flex justify-between items-center pt-2">
-              <div className="w-1/2 pr-2">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 pt-2">
+              <div className="w-full sm:w-1/2 sm:pr-2">
                 <label className="block text-xs font-bold text-slate-600 mb-1">Unidade</label>
                 <select 
                   className="w-full px-3 py-2 text-xs border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer" 
@@ -301,7 +308,7 @@ export default function TeamModal({ isOpen, onClose }: TeamModalProps) {
               <button 
                 type="submit" 
                 disabled={savingMember} 
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all shadow-sm mt-5 disabled:opacity-50 cursor-pointer"
+                className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 sm:py-2 rounded-lg text-xs transition-all shadow-sm disabled:opacity-50 cursor-pointer"
               >
                 {savingMember ? 'Cadastrando...' : '+ Adicionar Membro'}
               </button>
@@ -314,10 +321,67 @@ export default function TeamModal({ isOpen, onClose }: TeamModalProps) {
               <h3 className="text-sm font-bold text-slate-800">
                 Membros da Equipe ({teamMembers.length})
               </h3>
-              <span className="text-xs text-slate-400">Total de acessos ativos no CRM</span>
+              <span className="hidden sm:inline text-xs text-slate-400">Total de acessos ativos no CRM</span>
+            </div>
+
+            {/* CARDS MOBILE (LEITURA LIMPA SEM TABELA APERTADA) */}
+            <div className="md:hidden space-y-2.5">
+              {teamMembers.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-400 border border-slate-200 rounded-xl">
+                  Nenhum colaborador encontrado.
+                </div>
+              ) : (
+                teamMembers.map((m, idx) => {
+                  const cargoLower = (m.cargo || '').toLowerCase();
+                  const isAdmin = cargoLower.includes('admin');
+                  const isGerente = cargoLower.includes('gerente');
+
+                  return (
+                    <div key={m.id || m.email || idx} className="p-3.5 rounded-xl border border-slate-200 bg-white shadow-2xs space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-bold text-sm text-slate-800 truncate">{m.nome || m.name || 'Sem Nome'}</p>
+                          <p className="text-slate-400 text-xs truncate">{m.email}</p>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] shrink-0 ${
+                          isAdmin
+                            ? 'bg-purple-100 text-purple-700 border border-purple-200'
+                            : isGerente
+                            ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                            : 'bg-blue-100 text-blue-700 border border-blue-200'
+                        }`}>
+                          {m.cargo || 'atendente'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                        <span className="text-xs text-slate-600 font-semibold">
+                          🏥 {m.unidade || 'Todas'}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEdit(m)}
+                            className="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg cursor-pointer"
+                          >
+                            ✏️ Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setMemberToDelete(m)}
+                            className="px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg cursor-pointer"
+                          >
+                            🗑️ Excluir
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
             
-            <div className="border rounded-xl overflow-hidden border-slate-200">
+            <div className="hidden md:block border rounded-xl overflow-hidden border-slate-200">
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-100 text-slate-600 uppercase font-bold border-b border-slate-200">
                   <tr>
@@ -396,10 +460,11 @@ export default function TeamModal({ isOpen, onClose }: TeamModalProps) {
         </div>
 
         {/* RODAPÉ DO MODAL PRINCIPAL */}
-        <div className="bg-slate-50 border-t border-slate-200 p-4 text-right">
+        <div className="bg-slate-50 border-t border-slate-200 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-right shrink-0">
           <button 
+            type="button"
             onClick={onClose} 
-            className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-4 py-2 rounded-lg text-xs transition-all cursor-pointer"
+            className="w-full sm:w-auto bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-4 py-2.5 sm:py-2 rounded-lg text-xs transition-all cursor-pointer"
           >
             Fechar
           </button>
@@ -408,21 +473,22 @@ export default function TeamModal({ isOpen, onClose }: TeamModalProps) {
 
       {/* MODAL DE EDIÇÃO DO MEMBRO */}
       {editingMember && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-60 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="bg-slate-800 px-6 py-4 text-white flex justify-between items-center">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-60 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[92dvh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-slate-800 px-5 sm:px-6 py-4 text-white flex justify-between items-center shrink-0">
               <h3 className="text-base font-bold flex items-center gap-2">
                 <span>✏️ Editar Colaborador</span>
               </h3>
               <button 
+                type="button"
                 onClick={() => setEditingMember(null)} 
-                className="text-slate-400 hover:text-white text-lg font-bold cursor-pointer"
+                className="text-slate-400 hover:text-white text-lg font-bold p-1 cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleSaveEdit} className="p-6 space-y-4">
+            <form onSubmit={handleSaveEdit} className="p-5 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-4 overflow-y-auto touch-scroll">
               {editError && (
                 <div className="bg-red-50 text-red-700 text-xs p-3 rounded-lg border border-red-200 font-medium">
                   {editError}
@@ -451,7 +517,7 @@ export default function TeamModal({ isOpen, onClose }: TeamModalProps) {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Cargo / Função</label>
                   <select

@@ -160,11 +160,11 @@ export default function CloseSaleModal({
     : [procedimento, ...OPCOES_PROCEDIMENTO];
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-100 animate-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[92dvh] flex flex-col overflow-hidden border border-slate-100 animate-in zoom-in-95 duration-200">
         
         {/* CABEÇALHO */}
-        <div className="bg-gradient-to-r from-teal-600 to-emerald-600 px-6 py-4 flex justify-between items-center text-white">
+        <div className="bg-gradient-to-r from-teal-600 to-emerald-600 px-5 sm:px-6 py-4 flex justify-between items-center text-white shrink-0">
           <div className="flex items-center gap-2.5">
             <span className="text-2xl">💰</span>
             <div>
@@ -179,13 +179,14 @@ export default function CloseSaleModal({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Fechar modal"
             className="text-white/80 hover:text-white text-lg font-bold px-2 py-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
           >
             ✕
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} className="p-5 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-4 sm:space-y-5 flex-1 min-h-0 overflow-y-auto overscroll-contain touch-scroll">
           
           {/* IDENTIFICAÇÃO DO PACIENTE E SELO IMUTÁVEL DE ORIGEM DO AGENDAMENTO */}
           <div className={`p-4 rounded-xl border ${

@@ -62,20 +62,20 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans notranslate" translate="no">
+    <div className="min-h-dvh bg-slate-100 flex items-center justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom))] font-sans notranslate" translate="no">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
         
         {/* CABEÇALHO DA TELA DE LOGIN COM A LOGO OFICIAL */}
-        <div className="bg-blue-600 p-8 text-white text-center">
-          <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg p-2">
+        <div className="bg-blue-600 p-6 sm:p-8 text-white text-center">
+          <div className="w-20 h-20 sm:w-24 sm:h-24 bg-white rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 shadow-lg p-2">
             <img src="/logo.png" alt="Dent'up Odonto" className="w-full h-full object-contain" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight notranslate">Dent'up Odontologia</h1>
-          <p className="text-blue-100 text-sm mt-1">Plataforma Integrada de CRM & Atendimento</p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight notranslate">Dent'up Odontologia</h1>
+          <p className="text-blue-100 text-xs sm:text-sm mt-1">Plataforma Integrada de CRM & Atendimento</p>
         </div>
 
         {/* FORMULÁRIO */}
-        <form onSubmit={handleLogin} className="p-8 space-y-5">
+        <form onSubmit={handleLogin} className="p-5 sm:p-8 space-y-4 sm:space-y-5">
           {errorMsg && (
             <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r text-red-700 text-sm font-medium animate-fade-in">
               {errorMsg}

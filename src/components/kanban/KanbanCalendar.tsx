@@ -2,7 +2,7 @@
 
 "use client";
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 const GOOGLE_CALENDARS: Record<string, { id: string; color: string }> = {
   'Santo André': { id: 'e53816e5210cbd29f4e2d525f75e9fdbad0333c901a13d213e98d791e99b23b0%40group.calendar.google.com', color: '%23D50000' },
@@ -16,8 +16,16 @@ interface KanbanCalendarProps {
 }
 
 export default function KanbanCalendar({ targetUnidade }: KanbanCalendarProps) {
+  const [calendarMode, setCalendarMode] = useState<'AGENDA' | 'DAY' | 'WEEK'>('WEEK');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setCalendarMode('AGENDA');
+    }
+  }, []);
+
   const getGoogleCalendarUrl = () => {
-    const baseUrl = "https://calendar.google.com/calendar/embed?ctz=America%2FSao_Paulo&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=1&showTz=0&mode=WEEK";
+    const baseUrl = `https://calendar.google.com/calendar/embed?ctz=America%2FSao_Paulo&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=1&showTz=0&mode=${calendarMode}`;
     if (targetUnidade !== 'all' && targetUnidade !== 'Todas' && GOOGLE_CALENDARS[targetUnidade]) {
       const cal = GOOGLE_CALENDARS[targetUnidade];
       return `${baseUrl}&src=${cal.id}&color=${cal.color}`;
@@ -27,11 +35,34 @@ export default function KanbanCalendar({ targetUnidade }: KanbanCalendarProps) {
   };
 
   return (
-    <div className="flex-1 h-full w-full bg-white p-4">
+    <div className="flex-1 h-full min-h-0 w-full bg-white p-2 sm:p-4 flex flex-col gap-2">
+      {/* SELETOR DE VISUALIZAÇÃO AMIGÁVEL PARA CELULAR */}
+      <div className="md:hidden flex items-center justify-between gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200 shrink-0">
+        <span className="text-[11px] font-bold text-slate-500 pl-2">Visualização:</span>
+        <div className="flex bg-slate-200/70 p-0.5 rounded-lg">
+          {([
+            { id: 'AGENDA', label: 'Lista' },
+            { id: 'DAY', label: 'Dia' },
+            { id: 'WEEK', label: 'Semana' },
+          ] as const).map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setCalendarMode(m.id)}
+              className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                calendarMode === m.id ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <iframe 
         src={getGoogleCalendarUrl()} 
         style={{ border: 0 }} 
-        className="w-full h-full rounded-xl border border-slate-200 shadow-sm"
+        className="w-full flex-1 min-h-0 rounded-xl border border-slate-200 shadow-sm"
         frameBorder="0" 
         scrolling="no"
       />

@@ -12,6 +12,7 @@ interface HeaderProps {
   userUnidade: string;
   onOpenTeamModal: () => void;
   onLogout: () => void;
+  hideOnMobile?: boolean;
 }
 
 export default function Header({
@@ -22,12 +23,17 @@ export default function Header({
   userUnidade,
   onOpenTeamModal,
   onLogout,
+  hideOnMobile = false,
 }: HeaderProps) {
   return (
-    <div className="bg-white border-b border-slate-200 px-4 md:px-6 h-14 md:h-16 shrink-0 flex items-center justify-between z-20 shadow-sm">
+    <div
+      className={`bg-white border-b border-slate-200 px-3 sm:px-4 md:px-6 pt-[env(safe-area-inset-top)] min-h-14 md:h-16 shrink-0 items-center justify-between z-20 shadow-sm ${
+        hideOnMobile ? 'hidden md:flex' : 'flex'
+      }`}
+    >
       {/* BRANDING */}
-      <div className="flex items-center gap-3">
-        <img src="/logo.png" alt="Dent'up Odonto" className="h-8 md:h-10 w-auto object-contain" />
+      <div className="flex items-center gap-2.5 md:gap-3 min-w-0">
+        <img src="/logo.png" alt="Dent'up Odonto" className="h-8 md:h-10 w-auto object-contain shrink-0" />
         <div className="h-5 w-px bg-slate-200 hidden sm:block"></div>
         <h1 className="text-sm md:text-base font-bold text-slate-800 notranslate hidden sm:block" translate="no">
           CRM <span className="text-slate-400 font-medium">Clínica</span>
@@ -35,7 +41,7 @@ export default function Header({
       </div>
 
       {/* AÇÕES E NAVEGAÇÃO */}
-      <div className="flex items-center gap-3 md:gap-4">
+      <div className="flex items-center gap-2 sm:gap-3 md:gap-4 min-w-0">
         {isAdmin && (
           <button
             onClick={onOpenTeamModal}
@@ -68,15 +74,17 @@ export default function Header({
         </div>
 
         {/* PERFIL DO USUÁRIO & LOGOUT */}
-        <div className="flex items-center gap-2 md:gap-3 border-l border-slate-200 pl-3 md:pl-4">
-          <div className="text-right">
-            <p className="text-xs font-bold text-slate-800 notranslate">{userProfile?.nome || userProfile?.email || 'Usuário'}</p>
-            <div className="flex items-center justify-end gap-1">
+        <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3 border-l border-slate-200 pl-2.5 sm:pl-3 md:pl-4 min-w-0">
+          <div className="text-right min-w-0">
+            <p className="text-xs font-bold text-slate-800 notranslate truncate max-w-[125px] sm:max-w-[200px] md:max-w-none">
+              {userProfile?.nome || userProfile?.email || 'Usuário'}
+            </p>
+            <div className="flex items-center justify-end gap-1 flex-wrap">
               <span className="text-[9px] md:text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate">
                 {userProfile?.cargo || 'Atendente'}
               </span>
               {userUnidade !== 'Todas' && (
-                <span className="text-[9px] md:text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate">
+                <span className="text-[9px] md:text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded uppercase notranslate truncate max-w-[85px] sm:max-w-none">
                   {userUnidade}
                 </span>
               )}
@@ -85,7 +93,8 @@ export default function Header({
           <button
             onClick={onLogout}
             title="Encerrar Sessão"
-            className="p-1.5 text-slate-400 hover:text-red-600 transition-colors rounded-lg hover:bg-red-50 cursor-pointer"
+            aria-label="Encerrar Sessão"
+            className="w-10 h-10 md:w-auto md:h-auto md:p-1.5 flex items-center justify-center text-slate-400 hover:text-red-600 active:bg-red-50 transition-colors rounded-lg hover:bg-red-50 cursor-pointer shrink-0"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />

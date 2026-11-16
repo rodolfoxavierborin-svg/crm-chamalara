@@ -28,3 +28,48 @@ export const formatPhoneNumber = (phone: string | null | undefined): string => {
   }
   return phone;
 };
+
+/**
+ * Normaliza um telefone brasileiro para o padrão numérico internacional do WhatsApp (DDI 55 + DDD + número).
+ * Retorna null caso não haja dígitos suficientes para um link válido.
+ */
+export const normalizeWhatsAppDigits = (phone: string | null | undefined): string | null => {
+  if (!phone) return null;
+  let digits = phone.replace(/\D/g, '');
+  if (digits.startsWith('0') && (digits.length === 11 || digits.length === 12)) {
+    digits = digits.slice(1);
+  }
+  if (digits.length === 10 || digits.length === 11) {
+    digits = `55${digits}`;
+  }
+  if (digits.length < 12) return null;
+  return digits;
+};
+
+/**
+ * Gera a saudação padrão pré-preenchida para contato da recepção pelo WhatsApp.
+ */
+export const buildDentupGreeting = (name?: string | null): string => {
+  const cleanName = (name || '').trim();
+  if (cleanName && cleanName.toLowerCase() !== 'sem nome') {
+    const primeiroNome = cleanName.split(/\s+/)[0];
+    return `Olá ${primeiroNome}, tudo bem? Aqui é da Dent'up Odontologia!`;
+  }
+  return "Olá, tudo bem? Aqui é da Dent'up Odontologia!";
+};
+
+/**
+ * Gera o Universal Link oficial do WhatsApp (wa.me), compatível com iOS Safari, Android Chrome e Desktop.
+ */
+export const buildWhatsAppLink = (
+  phone: string | null | undefined,
+  prefillText?: string
+): string | null => {
+  const digits = normalizeWhatsAppDigits(phone);
+  if (!digits) return null;
+  const base = `https://wa.me/${digits}`;
+  if (prefillText && prefillText.trim()) {
+    return `${base}?text=${encodeURIComponent(prefillText.trim())}`;
+  }
+  return base;
+};

@@ -539,10 +539,10 @@ export default function KanbanAnalytics({
   }, [historicoMensal]);
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-slate-50/50 custom-scrollbar">
+    <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-scroll p-3 sm:p-6 space-y-5 sm:space-y-8 bg-slate-50/50 custom-scrollbar">
       
       {/* SEÇÃO 1: CARDS DE RESUMO EXECUTIVO */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         
         <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between">
@@ -613,7 +613,7 @@ export default function KanbanAnalytics({
       {/* =========================================================================
           SEÇÃO 2: COMPARATIVO DOS ÚLTIMOS MESES (MoM) COM GRÁFICO VISUAL
           ========================================================================= */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-6">
+      <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-5 sm:space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
           <div>
             <div className="flex items-center gap-2">
@@ -771,14 +771,14 @@ export default function KanbanAnalytics({
       {/* =========================================================================
           QUADRO 1 (PRÉ-VENDA / SDR): PERFORMANCE DE AGENDAMENTOS & ORIGINAÇÃO
           ========================================================================= */}
-      <div className="bg-white p-6 rounded-2xl border border-indigo-200/80 shadow-sm space-y-4">
+      <div className="bg-white p-4 sm:p-6 rounded-2xl border border-indigo-200/80 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div>
             <div className="flex items-center gap-2">
               <span className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg font-bold text-sm">
                 📅
               </span>
-              <h3 className="text-base font-extrabold text-slate-900">
+              <h3 className="text-sm sm:text-base font-extrabold text-slate-900">
                 Quadro 1: Performance de Agendamentos & Captação (Pré-Venda / SDR)
               </h3>
             </div>
@@ -786,13 +786,16 @@ export default function KanbanAnalytics({
               Mede quem agendou o paciente e quanto faturamento esses agendamentos geraram para a clínica (Blindado por Voucher VIP)
             </p>
           </div>
-          <span className="text-[11px] font-bold px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full">
+          <span className="text-[11px] font-bold px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full w-fit">
             🔒 Mérito de Agendamento Protegido
           </span>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <p className="sm:hidden text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+          ← Deslize a tabela para o lado →
+        </p>
+        <div className="overflow-x-auto touch-scroll">
+          <table className="w-full min-w-[660px] text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-200 text-[11px] font-black uppercase text-slate-400">
                 <th className="pb-3">Canal / Agendador (SDR)</th>
@@ -851,14 +854,14 @@ export default function KanbanAnalytics({
       {/* =========================================================================
           QUADRO 2 (FECHAMENTO NA CLÍNICA / CLOSERS): PRODUTIVIDADE COMERCIAL PRESENCIAL
           ========================================================================= */}
-      <div className="bg-white p-6 rounded-2xl border border-emerald-200/80 shadow-sm space-y-4">
+      <div className="bg-white p-4 sm:p-6 rounded-2xl border border-emerald-200/80 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div>
             <div className="flex items-center gap-2">
               <span className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg font-bold text-sm">
                 💼
               </span>
-              <h3 className="text-base font-extrabold text-slate-900">
+              <h3 className="text-sm sm:text-base font-extrabold text-slate-900">
                 Quadro 2: Fechamento Comercial na Clínica (Vendedores / Closers)
               </h3>
             </div>
@@ -869,14 +872,17 @@ export default function KanbanAnalytics({
           {loadingProfiles ? (
             <span className="text-xs font-semibold text-slate-400 animate-pulse">Atualizando equipe...</span>
           ) : (
-            <span className="text-[11px] font-bold px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full">
+            <span className="text-[11px] font-bold px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full w-fit">
               💰 Conversão Presencial na Clínica
             </span>
           )}
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <p className="sm:hidden text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+          ← Deslize a tabela para o lado →
+        </p>
+        <div className="overflow-x-auto touch-scroll">
+          <table className="w-full min-w-[660px] text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-200 text-[11px] font-black uppercase text-slate-400">
                 <th className="pb-3">Vendedor / Closer (Na Clínica)</th>
@@ -1046,14 +1052,14 @@ export default function KanbanAnalytics({
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
+        <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
           <div className="border-b border-slate-100 pb-3">
             <h3 className="text-base font-extrabold text-slate-900">Performance por Unidade</h3>
             <p className="text-xs text-slate-500 font-medium">Comparativo comercial entre as clínicas da rede</p>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          <div className="overflow-x-auto touch-scroll">
+            <table className="w-full min-w-[440px] text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-100 text-[11px] font-black uppercase text-slate-400">
                   <th className="pb-2">Unidade</th>
