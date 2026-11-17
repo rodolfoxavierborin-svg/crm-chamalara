@@ -2,6 +2,30 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
+  const isSuspended = process.env.APP_SUSPENDED === 'true';
+  const isSuspendedPage = request.nextUrl.pathname.startsWith('/suspenso');
+
+  // Modo de suspensão controlado pela variável de ambiente APP_SUSPENDED na Vercel
+  if (isSuspended) {
+    if (request.nextUrl.pathname.startsWith('/api')) {
+      return NextResponse.json(
+        { error: 'Sistema temporariamente indisponível, entre em contato com o suporte.' },
+        { status: 503 }
+      );
+    }
+
+    if (!isSuspendedPage) {
+      return NextResponse.redirect(new URL('/suspenso', request.url));
+    }
+
+    return NextResponse.next();
+  }
+
+  // Se o sistema estiver ativo, evita acesso manual à página de suspensão
+  if (isSuspendedPage) {
+    return NextResponse.redirect(new URL('/', request.url));
+  }
+
   let response = NextResponse.next({
     request: {
       headers: request.headers,
